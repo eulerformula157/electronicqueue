@@ -186,16 +186,16 @@ def create_ticket(ticket: TicketCreate):
         return {"error": "No windows available for this service"}
 
     # Round-robin выбор окна
-    next_window = windows[0]
+    #next_window = windows[0]
 
-    if service.last_window_id:
-        for i, w in enumerate(windows):
-            if w.id == service.last_window_id:
-                next_window = windows[(i + 1) % len(windows)]
-                break
+    #if service.last_window_id:
+    #    for i, w in enumerate(windows):
+    #        if w.id == service.last_window_id:
+    #            next_window = windows[(i + 1) % len(windows)]
+    #            break
 
     # Обновляем last_window_id
-    service.last_window_id = next_window.id
+    #service.last_window_id = next_window.id
 
     # Генерация номера
     #last_ticket = db.query(Ticket).order_by(Ticket.number.desc()).first()
@@ -205,7 +205,7 @@ def create_ticket(ticket: TicketCreate):
     db_ticket = Ticket(
         service_id=service.id,
         #number=next_number,
-        window_id=next_window.id,
+        #window_id=next_window.id,
         status="waiting"
     )
 
@@ -228,7 +228,7 @@ async def finish_ticket(operator_id: int = Body(..., embed=True)):
     
     ticket = db.query(Ticket).filter(
         Ticket.window_id == operator.window_id,
-        Ticket.status == "called"  # или "in_progress", в зависимости от твоей логики
+        Ticket.status == "called"  
     ).first()
 
     if not ticket:
@@ -336,7 +336,7 @@ def get_queue_by_operator(operator_id: int):
         .filter(
             Ticket.status == "waiting",
             Ticket.service_id.in_(service_ids),
-            Ticket.window_id == operator.window_id  # <-- фильтр по окну
+            #Ticket.window_id == operator.window_id  # <-- фильтр по окну
         )\
         .order_by(Ticket.created_at)\
         .all()
@@ -378,21 +378,21 @@ async def redirect_ticket(data: RedirectRequest):
             return {"detail": "Нет доступных окон для этой услуги, Пожалуйста сообщите клиенту"}
 
         # 4. Round-robin выбор окна
-        next_window = windows[0]
-        if service.last_window_id:
-            for i, w in enumerate(windows):
-                if w.id == service.last_window_id:
-                    next_window = windows[(i + 1) % len(windows)]
-                    break
+        #next_window = windows[0]
+        #if service.last_window_id:
+        #    for i, w in enumerate(windows):
+        #        if w.id == service.last_window_id:
+        #            next_window = windows[(i + 1) % len(windows)]
+        #            break
 
         # 5. Обновляем тикет
         ticket.service_id = service.id
         ticket.status = "waiting"
-        ticket.window_id = next_window.id
-        ticket.created_at = datetime.utcnow()
+        ticket.window_id = None
+        ticket.created_at = text("CURRENT_TIMESTAMP")
 
         # 6. Обновляем last_window_id услуги
-        service.last_window_id = next_window.id
+        #service.last_window_id = next_window.id
 
         db.commit()
         db.refresh(ticket)
