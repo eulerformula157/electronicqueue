@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Терминал очереди</title>
+
+
+<style>
+/* --- Константы --- */
+:root {
+    --button-height: 140px;        /* высота кнопок */
+    --button-width: 300px;        /* ширина кнопок */
+    --button-font-size: 18px;    /* размер текста */
+    --button-gap: 20px;          /* расстояние между кнопками */
+    --main-bg: #f4f6f8;          /* фон страницы */
+    --button-bg: #e05d1b;        /* цвет кнопок */
+    --button-hover-bg: #1490a3;  /* цвет при наведении */
+    --text-color: #333;
+    --notice-bg: #333;
+}
+
+/* --- Страница --- */
+body {
+    margin: 0;
+    padding: 40px 20px;
+    font-family: Arial, sans-serif;
+    text-align: center;
+    background: var(--main-bg);
+    min-height: 100vh;
+    box-sizing: border-box;
+}
+
+/* Заголовок */
+h1 {
+    margin-bottom: 40px;
+    color: var(--text-color);
+    font-size: 28px;
+}
+
+/* --- Контейнер кнопок --- */
+#services {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: var(--button-gap);
+    max-width: 1000px;
+    margin: 0 auto 30px auto;
+}
+
+/* --- Кнопки --- */
+button.service-btn {
+    width: var(--button-width);
+    height: var(--button-height);
+    font-size: var(--button-font-size);
+    background: var(--button-bg);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    transition: all 0.2s ease;
+}
+
+button.service-btn:hover {
+    background: var(--button-hover-bg);
+    transform: translateY(-3px);
+}
+
+button.service-btn:active {
+    transform: translateY(0);
+}
+
+/* --- Уведомление --- */
+#ticket-notice {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    color: #fff;
+    font-size: 32px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    text-align: center;
+    z-index: 999;
+}
+
+#ticket-notice span {
+    background: var(--notice-bg);
+    padding: 25px 50px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+}
+
+#ticket-notice .timer {
+    font-size: 22px;
+    font-weight: bold;
+}
+</style>
+</head>
+<body>
+
+<h1>Выберите услугу</h1>
+
+<div id="services"></div>
+
+<div id="ticket-notice">
+    <span id="ticket-message">Ваш номер: 1</span>
+    <div class="timer" id="ticket-timer">5</div>
+</div>
+
+<script>
+const API_URL = "http://localhost:8000";
+const NOTICE_DURATION = 5; // секунды, сколько показывать уведомление
+
+// --- Загрузка услуг ---
+async function loadServices() {
+    const res = await fetch(`${API_URL}/services`);
+    const services = await res.json();
+
+    const container = document.getElementById("services");
+    container.innerHTML = "";
+
+    services.forEach(service => {
+        const btn = document.createElement("button");
+        btn.textContent = service.name;
+        btn.classList.add("service-btn");
+        btn.onclick = () => createTicket(service.id);
+        container.appendChild(btn);
+    });
+}
+
+// --- Создание талона ---
+async function createTicket(serviceId) {
+    const buttons = document.querySelectorAll(".service-btn");
+    buttons.forEach(b => b.disabled = true);
+
+    try {
+        const res = await fetch(`${API_URL}/tickets/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ service_id: serviceId })
+        });
+
+        const ticket = await res.json();
+
+        // Если сервер вернул ошибку
+        if (ticket.error) {
+            showNotice("В данный момент нет доступных специалистов", 3);
+            buttons.forEach(b => b.disabled = false);
+            return;
+        }
+
+        // Успешное создание
+        showNotice(`Возьмите ваш талон: ${ticket.number}`, NOTICE_DURATION);
+
+    } catch (e) {
+        console.error(e);
+        showNotice("Ошибка системы. Попробуйте позже.", 3);
+    }
+
+    buttons.forEach(b => b.disabled = false);
+}
+
+function showNotice(message, duration) {
+    const notice = document.getElementById("ticket-notice");
+    const timerEl = document.getElementById("ticket-timer");
+
+    document.getElementById("ticket-message").textContent = message;
+
+    let remaining = duration;
+    timerEl.textContent = remaining;
+    notice.style.display = "flex";
+
+    const interval = setInterval(() => {
+        remaining -= 1;
+        timerEl.textContent = remaining;
+        if (remaining <= 0) {
+            clearInterval(interval);
+            notice.style.display = "none";
+        }
+    }, 1000);
+}
+
+// --- Инициализация ---
+loadServices();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Окно сотрудника</title>
+
+<style>
+body {
+    font-family: "Segoe UI", Arial, sans-serif;
+    margin: 0;
+    background: #f2f2f2;
+    color: #333;
+}
+
+/* ===== Верхний заголовок ===== */
+h1 {
+    text-align: center;
+    margin: 20px 0;
+    font-weight: 600;
+}
+
+/* ===== Общий контейнер ===== */
+.main-container {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 40px;
+    margin-top: 20px;
+}
+
+/* ===== Левая панель (очередь) ===== */
+#queue-panel {
+    width: 250px;
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+}
+
+#queue-panel h3 {
+    margin-top: 0;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 8px;
+}
+
+.queue-item {
+    padding: 10px;
+    margin-bottom: 8px;
+    background: #f7f7f7;
+    border-radius: 6px;
+    font-weight: 600;
+}
+
+/* ===== Центральная часть ===== */
+.center-panel {
+    text-align: center;
+}
+
+#current {
+    margin: 20px 0;
+    font-size: 36px;
+    font-weight: 600;
+}
+
+/* ===== Кнопки ===== */
+button {
+    padding: 12px 25px;
+    font-size: 16px;
+    margin: 10px;
+    cursor: pointer;
+    border: none;
+    border-radius: 8px;
+    background: #e0e0e0;
+    transition: 0.2s ease;
+}
+
+button:hover {
+    background: #d5d5d5;
+}
+
+button.primary {
+    background: #2d89ef;
+    color: white;
+}
+
+button.primary:hover {
+    background: #1b6fd8;
+}
+
+button.danger {
+    background: #d9534f;
+    color: white;
+}
+
+button.danger:hover {
+    background: #c9302c;
+}
+
+/* ===== Правая панель (оператор) ===== */
+#operator-info {
+    width: 280px;
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+    font-size: 15px;
+}
+
+#operator-info b {
+    display: inline-block;
+    width: 140px;
+}
+
+.status-btn {
+    padding: 8px 18px;
+    font-size: 14px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    margin-right: 8px;
+    font-weight: 600;
+    transition: 0.2s ease;
+}
+
+/* старт */
+.start {
+    background: #2ecc71;
+    color: white;
+}
+
+.start:hover {
+    background: #27ae60;
+}
+
+/* стоп */
+.stop {
+    background: #e74c3c;
+    color: white;
+}
+
+.stop:hover {
+    background: #c0392b;
+}
+
+/* активная кнопка */
+.status-active {
+    box-shadow: 0 0 0 3px rgba(0,0,0,0.2) inset;
+    transform: scale(0.98);
+}
+
+/* ===== Строка 1 (статус) ===== */
+.top-row {
+    display: flex;
+    gap: 15px;
+    padding: 20px 40px 10px 40px;
+}
+
+/* ===== Строка 2 (действия) ===== */
+.action-row {
+    display: flex;
+    gap: 15px;
+    padding: 10px 40px 20px 40px;
+    flex-wrap: wrap; /* ВАЖНО — кнопки можно добавлять */
+}
+
+/* ===== Рабочая зона ===== */
+.workspace {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 20px 40px;
+}
+
+/* Центр */
+.center-panel {
+    flex: 1;
+    text-align: center;
+}
+
+/* Левая панель */
+#queue-panel {
+    width: 260px;
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+}
+
+/* Правая панель */
+#operator-info {
+    width: 280px;
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+}
+}
+</style>
+</head>
+
+<body>
+<!-- ===== Первая строка кнопок ===== -->
+<div class="top-row">
+    <button id="btn-start" class="status-btn start" onclick="changeWindowStatus('online')">
+        НАЧАТЬ
+    </button>
+    <button id="btn-stop" class="status-btn stop" onclick="changeWindowStatus('offline')">
+        ОТОЙТИ
+    </button>
+</div>
+
+<!-- ===== Вторая строка кнопок ===== -->
+<div class="action-row">
+    <button class="primary" onclick="callNext()">Начать обслуживание</button>
+    <button class="danger" onclick="finishCurrent()">Завершить</button>
+    <button onclick="showRedirect()">Перенаправить</button>
+</div>
+
+<!-- ===== Основная рабочая зона ===== -->
+<div class="workspace">
+
+    <div id="queue-panel">
+        <h3>Очередь</h3>
+        Загрузка...
+    </div>
+
+    <div class="center-panel">
+        <div id="current">Окно свободно</div>
+
+        <div id="redirect-panel" style="display:none; margin-top:10px;">
+            <select id="redirect-service"></select>
+            <button onclick="confirmRedirect()">Подтвердить</button>
+        </div>
+    </div>
+
+    <div id="operator-info">
+        Загрузка информации...
+    </div>
+
+</div>
+</div>
+
+<script>
+const API_URL = "http://localhost:8000"; 
+const operatorId = parseInt(sessionStorage.getItem("operator_id"));
+
+if (!operatorId) {
+    alert("Не выполнен вход");
+    window.location.href = "/static/login.html";
+}
+
+
+let currentTicketId = null;
+let allServices = [];
+
+
+/* =========================
+   Загрузка информации об операторе
+========================= */
+async function loadOperatorInfo() {
+    try {
+        const operatorRes = await fetch(`${API_URL}/operators/`);
+        const operators = await operatorRes.json();
+        const operator = operators.find(o => o.id === operatorId);
+
+        if (!operator) {
+            document.getElementById("operator-info").textContent = "Оператор не найден";
+            return;
+        }
+
+        const windowsRes = await fetch(`${API_URL}/windows/`);
+        const windows = await windowsRes.json();
+        const windowObj = windows.find(w => w.id === operator.window_id);
+
+        const windowServicesRes = await fetch(`${API_URL}/window-services/`);
+        const windowServices = await windowServicesRes.json();
+
+        const servicesRes = await fetch(`${API_URL}/services/`);
+        const services = await servicesRes.json();
+
+        const serviceIds = windowServices
+            .filter(ws => ws.window_id === operator.window_id)
+            .map(ws => ws.service_id);
+
+        const serviceNames = services
+            .filter(s => serviceIds.includes(s.id))
+            .map(s => s.name);
+
+        // ------------------------
+        // Выводим всю информацию, просто status из окна
+        // ------------------------
+        document.getElementById("operator-info").innerHTML = `
+            <b>Оператор:</b> ${operator.name} <br>
+            <b>Окно:</b> ${windowObj ? windowObj.name : "не назначено"} <br>
+            <b>Статус:</b> ${windowObj ? windowObj.status : "нет данных"}<br>
+            <b>Оказываемые услуги:</b><br> ${serviceNames.join("<br>")}
+        `;
+
+    } catch (e) {
+        console.error(e);
+        document.getElementById("operator-info").textContent = "Ошибка загрузки данных";
+    }
+}
+
+
+
+/* =========================
+   Загрузка очереди оператора
+========================= */
+async function loadQueue() {
+    try {
+        const res = await fetch(`${API_URL}/tickets/queue-by-operator/${operatorId}`);
+        const tickets = await res.json();
+
+        const panel = document.getElementById("queue-panel");
+
+        if (!tickets.length) {
+            panel.innerHTML = "<h3>Очередь</h3>Нет ожидающих";
+            return;
+        }
+
+        panel.innerHTML = "<h3>Очередь</h3>" +
+            tickets.map(t =>
+                `<div class="queue-item">№ ${t.number}</div>`
+            ).join("");
+
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+/* =========================
+   Вызов следующего клиента
+========================= */
+async function callNext() {
+    const res = await fetch(`${API_URL}/tickets/next-by-operator`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operator_id: operatorId })
+    });
+
+    const ticket = await res.json();
+
+    if (ticket.detail) {
+        document.getElementById("current").textContent = ticket.detail;
+        currentTicketId = null;
+    } else {
+        document.getElementById("current").textContent =
+            "Текущий клиент: " + ticket.number;
+
+        currentTicketId = ticket.id;
+    }
+
+    loadQueue();
+}
+
+/* =========================
+   Завершение обслуживания
+========================= */
+async function finishCurrent() {
+    try {
+        const res = await fetch(`${API_URL}/tickets/finish`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ operator_id: operatorId }) // теперь отправляем операторa
+        });
+
+        const result = await res.json();
+
+        if (result.detail) {
+            alert(result.detail); // например, "Нет текущего клиента"
+            document.getElementById("current").textContent = "Окно свободно";
+        } else {
+            document.getElementById("current").textContent = "Окно свободно";
+        }
+
+        loadQueue(); // обновляем очередь
+
+    } catch (e) {
+        console.error(e);
+        alert("Ошибка при завершении обслуживания");
+    }
+}
+
+/* =========================
+   Загрузка всех услуг
+========================= */
+async function loadAllServices() {
+    try {
+        const res = await fetch(`${API_URL}/services/`);
+        allServices = await res.json();
+    } catch (e) {
+        console.error("Ошибка загрузки услуг:", e);
+    }
+}
+
+/* =========================
+   Показ панели перенаправления
+========================= */
+function showRedirect() {
+	currentTicketId = loadCurrentTicket();
+
+    if (!currentTicketId) {
+        alert("Нет текущего клиента");
+        return;
+    }
+
+    const select = document.getElementById("redirect-service");
+    select.innerHTML = "";
+
+    allServices.forEach(service => {
+        const option = document.createElement("option");
+        option.value = service.id;
+        option.textContent = service.name;
+        select.appendChild(option);
+    });
+
+    document.getElementById("redirect-panel").style.display = "block";
+}
+
+/* =========================
+   Подтверждение перенаправления
+========================= */
+async function confirmRedirect() {
+    const newServiceId = document.getElementById("redirect-service").value;
+
+    if (!newServiceId) {
+        alert("Выберите услугу");
+        return;
+    }
+
+    if (!confirm("Вы уверены, что хотите перенаправить клиента?")) {
+        return;
+    }
+
+    const res = await fetch(`${API_URL}/tickets/redirect`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            ticket_id: currentTicketId,
+            new_service_id: parseInt(newServiceId)
+        })
+    });
+
+    const result = await res.json();
+
+    if (result.detail) {
+        alert(result.detail);
+    } else {
+        alert("Билет перенаправлен");
+        document.getElementById("current").textContent = "Окно свободно";
+        currentTicketId = null;
+        document.getElementById("redirect-panel").style.display = "none";
+        loadQueue();
+    }
+}
+
+async function changeWindowStatus(newStatus) {
+    try {
+        const operatorRes = await fetch(`${API_URL}/operators/`);
+        const operators = await operatorRes.json();
+        const operator = operators.find(o => o.id === operatorId);
+
+        if (!operator || !operator.window_id) {
+            alert("Окно не назначено");
+            return;
+        }
+
+        const res = await fetch(`${API_URL}/windows/update-status`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                window_id: operator.window_id,
+                status: newStatus
+            })
+        });
+
+        const result = await res.json();
+
+        if (result.detail) {
+            alert(result.detail);
+        } else {
+            updateStatusButtons(newStatus);
+            loadOperatorInfo();
+        }
+
+    } catch (e) {
+        console.error(e);
+        alert("Ошибка смены статуса");
+    }
+}
+
+function updateStatusButtons(status) {
+    const startBtn = document.getElementById("btn-start");
+    const stopBtn = document.getElementById("btn-stop");
+
+    startBtn.classList.remove("status-active");
+    stopBtn.classList.remove("status-active");
+
+    if (status === "online") {
+        startBtn.classList.add("status-active");
+    } else {
+        stopBtn.classList.add("status-active");
+    }
+}
+
+async function loadCurrentTicket() {
+    try {
+        const res = await fetch(`${API_URL}/tickets/current/${operatorId}`);
+        const data = await res.json();
+        if (data.ticket) {
+            currentTicketId = data.ticket.id;
+        } else {
+            currentTicketId = null;
+        }
+    } catch (e) {
+        console.error(e);
+        currentTicketId = null;
+    }
+}
+
+/* =========================
+   Инициализация
+========================= */
+loadOperatorInfo();
+loadQueue();
+loadAllServices();
+setInterval(loadQueue, 5000);
+setInterval(loadOperatorInfo, 5000);
+
+</script>
+
+</body>
+</html>
