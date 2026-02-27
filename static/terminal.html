@@ -125,6 +125,17 @@ button.service-btn.unavailable:hover {
 </div>
 
 <script>
+const socket = new WebSocket("ws://localhost:8000/ws/terminal");
+
+socket.onmessage = function(event) {
+    const data = JSON.parse(event.data);
+
+    if (data.type === "services_updated") {
+        loadServices();  // просто перезагружаем список
+    }
+};
+
+
 const API_URL = "http://localhost:8000";
 const NOTICE_DURATION = 5;
 
@@ -144,7 +155,11 @@ async function loadServices() {
             if (service.status === "inactive") {
                 btn.textContent = `${service.name} (сейчас не активна)`;
                 btn.classList.add("unavailable");
-                btn.disabled = true;
+
+                // вместо блокировки просто показываем уведомление
+                btn.onclick = () => {
+                    showNotice("В данный момент нет доступных специалистов. Услуга недоступна", 5);
+                };
             } else {
                 btn.textContent = service.name;
                 btn.onclick = () => createTicket(service.id);

@@ -39,11 +39,12 @@ class ConnectionManager:
     def disconnect(self, websocket: WebSocket):
         self.active_connections.remove(websocket)
 
-    async def broadcast(self, message: str):
+    async def broadcast(self, message: dict):
         for connection in self.active_connections:
-            await connection.send_text(message)
+            await connection.send_json(message)
 
-manager = ConnectionManager()
+
+manager = ConnectionManager()   
 
 # Разрешение для CORS
 
@@ -463,7 +464,7 @@ def list_window_services():
     return result
 
 @app.post("/login", tags=["Auth"])
-def login(login: str = Body(...), password: str = Body(...)):
+async def login(login: str = Body(...), password: str = Body(...)):
     db = SessionLocal()
     try:
         operator = db.query(Operator).filter(
@@ -477,6 +478,8 @@ def login(login: str = Body(...), password: str = Body(...)):
                 detail="Неверный логин или пароль"
             )
 
+        window_id = None
+
         # Если у оператора есть окно — делаем его online
         if operator.window_id:
             window = db.query(Window).filter(
@@ -485,10 +488,20 @@ def login(login: str = Body(...), password: str = Body(...)):
 
             if window:
                 window.status = "online"
+                window_id = window.id
+
+
 
         db.commit()
-        
-        update_services_status(db)
+
+        # пересчитываем только если есть окно
+        if window_id:
+            update_services_status_for_window(db, window_id)
+            
+            await manager.broadcast({
+            "type": "services_updated",
+            "window_id": window_id
+        })
 
         return {
             "operator_id": operator.id,
@@ -500,7 +513,7 @@ def login(login: str = Body(...), password: str = Body(...)):
         db.close()
 
 @app.post("/windows/update-status", tags=["Windows"])
-def update_window_status(data: WindowStatusUpdate):
+async def update_window_status(data: WindowStatusUpdate):
     db = SessionLocal()
     try:
         window = db.query(Window).filter(Window.id == data.window_id).first()
@@ -512,6 +525,11 @@ def update_window_status(data: WindowStatusUpdate):
 
         # пересчитываем только связанные услуги
         update_services_status_for_window(db, window.id)
+        
+        
+        await manager.broadcast({
+            "type": "services_updated"
+        })
 
         db.refresh(window)
         return window
@@ -536,6 +554,17 @@ def get_current_ticket(operator_id: int):
     finally:
         db.close()
 
+# ------------------ WebSocket Эндпоинты ------------------
+
+@app.websocket("/ws/terminal")
+async def websocket_terminal(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()  # держим соединение
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
 @app.websocket("/ws/board")
 async def websocket_board(websocket: WebSocket):
     await manager.connect(websocket)
@@ -549,6 +578,7 @@ async def websocket_board(websocket: WebSocket):
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+        
 # ------------------ Дополнительные функции ------------------
 
 def get_called_tickets():
@@ -580,7 +610,7 @@ async def broadcast_board():
     await manager.broadcast(json.dumps(data))
 
 def update_services_status_for_window(db: Session, window_id: int):
-    # получаем все услуги, привязанные к окну
+    # 1. Получаем услуги этого окна
     service_ids = (
         db.query(WindowService.service_id)
         .filter(WindowService.window_id == window_id)
@@ -590,10 +620,10 @@ def update_services_status_for_window(db: Session, window_id: int):
     service_ids = [s[0] for s in service_ids]
 
     for service_id in service_ids:
-        # проверяем есть ли online окна для этой услуги
+        # 2. Считаем online окна для этой услуги
         online_count = (
-            db.query(Window)
-            .join(WindowService)
+            db.query(WindowService)
+            .join(Window, Window.id == WindowService.window_id)
             .filter(
                 WindowService.service_id == service_id,
                 Window.status == "online"

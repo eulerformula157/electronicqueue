@@ -249,6 +249,25 @@ if (!operatorId) {
     window.location.href = "/static/login.html";
 }
 
+// ==================== WebSocket ====================
+const socket = new WebSocket("ws://localhost:8000/ws/terminal");
+
+socket.onopen = () => {
+    console.log("WebSocket подключен");
+};
+
+socket.onmessage = function(event) {
+    const data = JSON.parse(event.data);
+
+    if (data.type === "services_updated") {
+        // обновляем информацию об операторе сразу при изменении окна
+        loadOperatorInfo();
+    }
+};
+
+socket.onclose = () => {
+    console.log("WebSocket отключен");
+};
 
 let currentTicketId = null;
 let allServices = [];
