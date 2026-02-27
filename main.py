@@ -570,8 +570,8 @@ async def websocket_board(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         # при подключении сразу отправляем текущее состояние
-        data = get_called_tickets()
-        await websocket.send_text(json.dumps(data))
+        tickets_data = get_called_tickets()  # массив с window_name и number
+        await websocket.send_json(tickets_data)
 
         while True:
             await websocket.receive_text()  # держим соединение живым
@@ -606,8 +606,13 @@ def get_called_tickets():
         db.close()
         
 async def broadcast_board():
-    data = get_called_tickets()
-    await manager.broadcast(json.dumps(data))
+    tickets_data = get_called_tickets()
+    # Для доски шлем массив напрямую
+    for conn in manager.active_connections:
+        try:
+            await conn.send_json(tickets_data)
+        except:
+            pass
 
 def update_services_status_for_window(db: Session, window_id: int):
     # 1. Получаем услуги этого окна
