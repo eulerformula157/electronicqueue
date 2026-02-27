@@ -4,17 +4,16 @@
 <meta charset="UTF-8">
 <title>Терминал очереди</title>
 
-
 <style>
 /* --- Константы --- */
 :root {
-    --button-height: 140px;        /* высота кнопок */
-    --button-width: 300px;        /* ширина кнопок */
-    --button-font-size: 18px;    /* размер текста */
-    --button-gap: 20px;          /* расстояние между кнопками */
-    --main-bg: #f4f6f8;          /* фон страницы */
-    --button-bg: #e05d1b;        /* цвет кнопок */
-    --button-hover-bg: #1490a3;  /* цвет при наведении */
+    --button-height: 140px;
+    --button-width: 300px;
+    --button-font-size: 18px;
+    --button-gap: 20px;
+    --main-bg: #f4f6f8;
+    --button-bg: #e05d1b;
+    --button-hover-bg: #1490a3;
     --text-color: #333;
     --notice-bg: #333;
 }
@@ -30,7 +29,6 @@ body {
     box-sizing: border-box;
 }
 
-/* Заголовок */
 h1 {
     margin-bottom: 40px;
     color: var(--text-color);
@@ -73,6 +71,19 @@ button.service-btn:active {
     transform: translateY(0);
 }
 
+/* --- Неактивная услуга --- */
+button.service-btn.unavailable {
+    background: #b5b5b5;
+    cursor: not-allowed;
+    opacity: 0.85;
+    transform: none;
+}
+
+button.service-btn.unavailable:hover {
+    background: #b5b5b5;
+    transform: none;
+}
+
 /* --- Уведомление --- */
 #ticket-notice {
     position: fixed;
@@ -101,6 +112,7 @@ button.service-btn:active {
 }
 </style>
 </head>
+
 <body>
 
 <h1>Выберите услугу</h1>
@@ -108,29 +120,42 @@ button.service-btn:active {
 <div id="services"></div>
 
 <div id="ticket-notice">
-    <span id="ticket-message">Ваш номер: 1</span>
-    <div class="timer" id="ticket-timer">5</div>
+    <span id="ticket-message"></span>
+    <div class="timer" id="ticket-timer"></div>
 </div>
 
 <script>
 const API_URL = "http://localhost:8000";
-const NOTICE_DURATION = 5; // секунды, сколько показывать уведомление
+const NOTICE_DURATION = 5;
 
 // --- Загрузка услуг ---
 async function loadServices() {
-    const res = await fetch(`${API_URL}/services`);
-    const services = await res.json();
+    try {
+        const res = await fetch(`${API_URL}/services/`);
+        const services = await res.json();
 
-    const container = document.getElementById("services");
-    container.innerHTML = "";
+        const container = document.getElementById("services");
+        container.innerHTML = "";
 
-    services.forEach(service => {
-        const btn = document.createElement("button");
-        btn.textContent = service.name;
-        btn.classList.add("service-btn");
-        btn.onclick = () => createTicket(service.id);
-        container.appendChild(btn);
-    });
+        services.forEach(service => {
+            const btn = document.createElement("button");
+            btn.classList.add("service-btn");
+
+            if (service.status === "inactive") {
+                btn.textContent = `${service.name} (сейчас не активна)`;
+                btn.classList.add("unavailable");
+                btn.disabled = true;
+            } else {
+                btn.textContent = service.name;
+                btn.onclick = () => createTicket(service.id);
+            }
+
+            container.appendChild(btn);
+        });
+
+    } catch (error) {
+        console.error("Ошибка загрузки услуг:", error);
+    }
 }
 
 // --- Создание талона ---
@@ -147,24 +172,26 @@ async function createTicket(serviceId) {
 
         const ticket = await res.json();
 
-        // Если сервер вернул ошибку
         if (ticket.error) {
             showNotice("В данный момент нет доступных специалистов", 3);
-            buttons.forEach(b => b.disabled = false);
             return;
         }
 
-        // Успешное создание
-        showNotice(`Возьмите ваш талон: ${ticket.number}`, NOTICE_DURATION);
+        showNotice(`Возьмите ваш талон: ${ticket.number ?? "—"}`, NOTICE_DURATION);
 
     } catch (e) {
         console.error(e);
         showNotice("Ошибка системы. Попробуйте позже.", 3);
     }
 
-    buttons.forEach(b => b.disabled = false);
+    buttons.forEach(b => {
+        if (!b.classList.contains("unavailable")) {
+            b.disabled = false;
+        }
+    });
 }
 
+// --- Показ уведомления ---
 function showNotice(message, duration) {
     const notice = document.getElementById("ticket-notice");
     const timerEl = document.getElementById("ticket-timer");
@@ -176,15 +203,15 @@ function showNotice(message, duration) {
     notice.style.display = "flex";
 
     const interval = setInterval(() => {
-        remaining -= 1;
+        remaining--;
         timerEl.textContent = remaining;
+
         if (remaining <= 0) {
             clearInterval(interval);
             notice.style.display = "none";
         }
     }, 1000);
 }
-
 // --- Инициализация ---
 loadServices();
 </script>

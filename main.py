@@ -68,6 +68,7 @@ class Service(Base):
     __tablename__ = "services"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
+    status = Column(String, default="inactive")
     last_window_id = Column(Integer, ForeignKey("windows.id"), nullable=True)
 
 
@@ -486,6 +487,8 @@ def login(login: str = Body(...), password: str = Body(...)):
                 window.status = "online"
 
         db.commit()
+        
+        update_services_status(db)
 
         return {
             "operator_id": operator.id,
@@ -498,24 +501,23 @@ def login(login: str = Body(...), password: str = Body(...)):
 
 @app.post("/windows/update-status", tags=["Windows"])
 def update_window_status(data: WindowStatusUpdate):
-    if data.status not in ["online", "offline"]:
-        raise HTTPException(status_code=400, detail="Invalid status")
-    
     db = SessionLocal()
-    window = db.query(Window).filter(Window.id == data.window_id).first()
-    if not window:
+    try:
+        window = db.query(Window).filter(Window.id == data.window_id).first()
+        if not window:
+            raise HTTPException(status_code=404, detail="Window not found")
+
+        window.status = data.status.lower()
+        db.commit()
+
+        # пересчитываем только связанные услуги
+        update_services_status_for_window(db, window.id)
+
+        db.refresh(window)
+        return window
+
+    finally:
         db.close()
-        raise HTTPException(status_code=404, detail="Window not found")
-    
-
-
-    window.status = data.status
-    db.commit()
-    db.refresh(window)
-    db.close()
-    
-
-    return window
 
 @app.get("/tickets/current/{operator_id}", tags=["Tickets"])
 def get_current_ticket(operator_id: int):
@@ -577,7 +579,34 @@ async def broadcast_board():
     data = get_called_tickets()
     await manager.broadcast(json.dumps(data))
 
+def update_services_status_for_window(db: Session, window_id: int):
+    # получаем все услуги, привязанные к окну
+    service_ids = (
+        db.query(WindowService.service_id)
+        .filter(WindowService.window_id == window_id)
+        .all()
+    )
 
+    service_ids = [s[0] for s in service_ids]
+
+    for service_id in service_ids:
+        # проверяем есть ли online окна для этой услуги
+        online_count = (
+            db.query(Window)
+            .join(WindowService)
+            .filter(
+                WindowService.service_id == service_id,
+                Window.status == "online"
+            )
+            .count()
+        )
+
+        service = db.query(Service).filter(Service.id == service_id).first()
+
+        if service:
+            service.status = "active" if online_count > 0 else "inactive"
+
+    db.commit()
 
 # ------------------ Создание таблиц ------------------
 Base.metadata.create_all(bind=engine)
