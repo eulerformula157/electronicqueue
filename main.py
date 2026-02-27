@@ -161,7 +161,7 @@ def list_services():
     return services
   
 @app.post("/tickets/", tags=["Tickets"])
-def create_ticket(ticket: TicketCreate):
+async def create_ticket(ticket: TicketCreate):
     db = SessionLocal()
 
     # Получаем услугу
@@ -211,6 +211,10 @@ def create_ticket(ticket: TicketCreate):
         status="waiting"
     )
 
+    await manager.broadcast({
+        "type": "queue_updated"
+    })
+
     db.add(db_ticket)
     db.commit()
     db.refresh(db_ticket)
@@ -236,6 +240,10 @@ async def finish_ticket(operator_id: int = Body(..., embed=True)):
     if not ticket:
         db.close()
         return {"detail": "Нет текущего клиента"}
+
+    await manager.broadcast({
+        "type": "queue_updated"
+    })
 
     # Завершаем тикет
     ticket.status = "finished"
@@ -395,6 +403,10 @@ async def redirect_ticket(data: RedirectRequest):
 
         # 6. Обновляем last_window_id услуги
         #service.last_window_id = next_window.id
+
+        await manager.broadcast({
+            "type": "queue_updated"
+        })
 
         db.commit()
         db.refresh(ticket)
@@ -579,6 +591,20 @@ async def websocket_board(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
         
+@app.websocket("/ws/operator/{operator_id}")
+async def websocket_operator(websocket: WebSocket, operator_id: int):
+    await manager.connect(websocket)
+    try:
+        # при подключении сразу отправляем текущие данные
+        operator_data = get_operator_state(operator_id)
+        await websocket.send_json(operator_data)
+
+        while True:
+            await websocket.receive_text()  # держим соединение живым
+
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
 # ------------------ Дополнительные функции ------------------
 
 def get_called_tickets():
@@ -642,6 +668,38 @@ def update_services_status_for_window(db: Session, window_id: int):
             service.status = "active" if online_count > 0 else "inactive"
 
     db.commit()
+
+def get_operator_state(operator_id: int):
+    db = SessionLocal()
+    try:
+        operator = db.query(Operator).filter(Operator.id == operator_id).first()
+        if not operator or not operator.window_id:
+            return {"error": "Оператор не найден или нет окна"}
+
+        window = db.query(Window).filter(Window.id == operator.window_id).first()
+
+        window_services = db.query(WindowService).filter(WindowService.window_id == operator.window_id).all()
+        service_ids = [ws.service_id for ws in window_services]
+
+        services = db.query(Service).filter(Service.id.in_(service_ids)).all()
+
+        tickets = db.query(Ticket)\
+            .filter(Ticket.status=="waiting", Ticket.service_id.in_(service_ids))\
+            .order_by(Ticket.created_at).all()
+
+        current_ticket = db.query(Ticket)\
+            .filter(Ticket.window_id==operator.window_id, Ticket.status=="called")\
+            .first()
+
+        return {
+            "operator": {"id": operator.id, "name": operator.name},
+            "window": {"id": window.id, "name": window.name, "status": window.status if window else "offline"},
+            "services": [s.name for s in services],
+            "queue": [{"id": t.id, "number": t.number} for t in tickets],
+            "current_ticket": {"id": current_ticket.id, "number": current_ticket.number} if current_ticket else None
+        }
+    finally:
+        db.close()
 
 # ------------------ Создание таблиц ------------------
 Base.metadata.create_all(bind=engine)

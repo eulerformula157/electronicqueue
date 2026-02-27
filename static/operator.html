@@ -262,6 +262,11 @@ socket.onmessage = function(event) {
     if (data.type === "services_updated") {
         // обновляем информацию об операторе сразу при изменении окна
         loadOperatorInfo();
+    }    
+	
+	if (data.type === "queue_updated") {
+        // обновляем информацию об очереди сразу при изменении
+        loadQueue();
     }
 };
 
@@ -544,8 +549,7 @@ async function loadCurrentTicket() {
 loadOperatorInfo();
 loadQueue();
 loadAllServices();
-setInterval(loadQueue, 5000);
-setInterval(loadOperatorInfo, 5000);
+
 
 </script>
 
