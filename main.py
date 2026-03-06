@@ -105,7 +105,12 @@ class Window(Base):
     name = Column(String, nullable=False)
     status = Column(String, default="offline")    
 
+class OperatorLoginUpdate(BaseModel):
+    login: str
+    password: str
 
+class ServiceStatusUpdate(BaseModel):
+    status: str  # "active" или "inactive"
 # ------------------ Pydantic схемы ------------------
 
 class ServiceCreate(BaseModel):
@@ -146,6 +151,8 @@ class WindowStatusUpdate(BaseModel):
     window_id: int
     status: str  # "online" или "offline"
 
+class WindowStatusUpdate(BaseModel):
+    status: str
 # ------------------ Эндпоинты ------------------
 
 @app.post("/services/", tags=["Services"])
@@ -192,6 +199,31 @@ async def rename_service(service_id: int, data: ServiceRename):
     db.close()
 
     return service
+
+@app.patch("/services/{service_id}/status", tags=["Services"])
+async def update_service_status(
+    service_id: int = Path(..., gt=0),
+    data: ServiceStatusUpdate = ...
+):
+    db = SessionLocal()
+    try:
+        service = db.query(Service).filter(Service.id == service_id).first()
+        if not service:
+            raise HTTPException(status_code=404, detail="Service not found")
+
+        if data.status not in ["active", "inactive"]:
+            raise HTTPException(status_code=400, detail="Invalid status")
+
+        service.status = data.status
+        db.commit()
+        db.refresh(service)
+
+        # Бродкаст через WebSocket, чтобы фронт обновился
+        await manager.broadcast({"type": "services_updated"})
+
+        return {"id": service.id, "status": service.status}
+    finally:
+        db.close()
   
 @app.post("/tickets/", tags=["Tickets"])
 async def create_ticket(ticket: TicketCreate):
@@ -493,6 +525,31 @@ def list_windows():
     db.close()
     return windows
 
+@app.patch("/windows/{window_id}/status", tags=["Windows"])
+async def update_window_status(window_id: int, data: WindowStatusUpdate = Body(...)):
+    db = SessionLocal()
+    try:
+        window = db.query(Window).filter(Window.id == window_id).first()
+        if not window:
+            raise HTTPException(status_code=404, detail="Window not found")
+
+        # Проверка допустимых статусов
+        if data.status not in ["online", "offline", "maintenance"]:
+            raise HTTPException(status_code=400, detail="Invalid status")
+
+        window.status = data.status
+        db.commit()
+
+        # Пересчитать статусы связанных услуг
+        update_services_status_for_window(db, window_id)
+
+        # Бродкаст через WebSocket
+        await manager.broadcast({"type": "services_updated", "window_id": window_id})
+
+        db.refresh(window)
+        return {"id": window.id, "status": window.status}
+    finally:
+        db.close()
 
 @app.post("/window-services/", tags=["Windows"])
 def create_window_service(data: WindowServiceCreate):
@@ -538,6 +595,31 @@ def get_window_services(window_id: int):
 
     db.close()
     return services
+
+@app.put("/window-services/{window_id}", tags=["Windows"])
+def update_window_services(window_id: int, service_ids: list[int]):
+
+    db = SessionLocal()
+
+    current = db.query(WindowService).filter_by(window_id=window_id).all()
+    current_ids = {x.service_id for x in current}
+
+    new_ids = set(service_ids)
+
+    # удалить лишние
+    for ws in current:
+        if ws.service_id not in new_ids:
+            db.delete(ws)
+
+    # добавить новые
+    for sid in new_ids:
+        if sid not in current_ids:
+            db.add(WindowService(window_id=window_id, service_id=sid))
+
+    db.commit()
+    db.close()
+
+    return {"window_id": window_id, "services": list(new_ids)}
 
 @app.delete("/window-services/{window_id}/{service_id}", tags=["Windows"])
 def delete_window_service(window_id: int, service_id: int):
@@ -686,7 +768,20 @@ def delete_window(window_id: int):
     db.close()
 
     return {"message": "Window deleted"}
-    
+ 
+@app.patch("/windows/{window_id}", tags=["Windows"])
+def rename_window(window_id: int, data: WindowCreate):
+    db = SessionLocal()
+    window = db.query(Window).filter(Window.id == window_id).first()
+    if not window:
+        db.close()
+        raise HTTPException(status_code=404, detail="Window not found")
+    window.name = data.name
+    db.commit()
+    db.refresh(window)
+    db.close()
+    return window
+ 
 @app.delete("/operators/{operator_id}", tags=["Operators"])
 def delete_operator(operator_id: int):
     db = SessionLocal()
@@ -724,17 +819,54 @@ def update_operator(operator_id: int, data: dict):
 
     op = db.query(Operator).filter(Operator.id == operator_id).first()
 
+    if not op:
+        db.close()
+        raise HTTPException(status_code=404, detail="Operator not found")
+
     if "name" in data:
         op.name = data["name"]
 
     if "window_id" in data:
-        op.window_id = data["window_id"]
+
+        new_window = data["window_id"]
+
+        if new_window is not None:
+
+            existing = db.query(Operator).filter(
+                Operator.window_id == new_window,
+                Operator.id != operator_id
+            ).first()
+
+            if existing:
+                db.close()
+                raise HTTPException(
+                    status_code=400,
+                    detail="Это окно уже занято другим оператором"
+                )
+
+        op.window_id = new_window
 
     db.commit()
     db.refresh(op)
     db.close()
 
     return op
+
+@app.put("/operators/{operator_id}/login", tags=["Operators"])
+def update_operator_login(operator_id: int = Path(..., gt=0), data: OperatorLoginUpdate = ...):
+    db: Session = SessionLocal()
+    operator = db.query(Operator).filter(Operator.id == operator_id).first()
+    if not operator:
+        db.close()
+        raise HTTPException(status_code=404, detail="Operator not found")
+
+    # Обновляем поля
+    operator.login = data.login
+    operator.password = data.password  # можно добавить хэширование, если нужно
+    db.commit()
+    db.refresh(operator)
+    db.close()
+    return {"message": "Login and password updated", "operator_id": operator.id}
 
 # ------------------ WebSocket Эндпоинты ------------------
 

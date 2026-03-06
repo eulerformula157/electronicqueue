@@ -3,22 +3,87 @@
 <head>
 <meta charset="UTF-8">
 <title>Admin Panel</title>
+
 <style>
-body{font-family:Arial;background:#f4f4f4;margin:0;}
-header{background:#333;color:white;padding:15px;font-size:20px;}
-.tabs{display:flex;background:#ddd;}
-.tabs button{padding:12px 20px;border:none;background:#ddd;cursor:pointer;}
-.tabs button:hover{background:#ccc;}
-.content{padding:20px;}
-table{border-collapse:collapse;width:100%;background:white;}
-th,td{border:1px solid #ddd;padding:8px;text-align:left;}
-button{padding:6px 12px;cursor:pointer;margin-right:5px;}
-.actions button{margin-right:5px;}
-.form{margin-bottom:20px;background:white;padding:15px;border:1px solid #ddd;}
-input[type="text"]{width:90%;padding:5px;} /* широкие поля ввода */
+
+body{font-family:Arial;background:#f4f4f4;margin:0}
+
+header{
+background:#333;
+color:white;
+padding:15px;
+font-size:20px
+}
+
+.tabs{display:flex;background:#ddd}
+
+.tabs button{
+padding:12px 20px;
+border:none;
+background:#ddd;
+cursor:pointer
+}
+
+.tabs button:hover{background:#ccc}
+
+.content{padding:20px}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  table-layout: fixed; /* фиксированные колонки */
+  background: white;
+}
+
+th, td {
+  border: 1px solid #ddd;
+  padding: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap; /* чтобы текст не переносился */
+}
+
+/* Можно задать конкретные ширины колонок */
+th:nth-child(1), td:nth-child(1) { width: 50px; }   /* ID */
+th:nth-child(2), td:nth-child(2) { width: 500px; }  /* Название */
+th:nth-child(3), td:nth-child(3) { width: 150px; }  /* Действия */
+
+button{
+padding:6px 12px;
+cursor:pointer
+}
+
+.form{
+margin-bottom:20px;
+background:white;
+padding:15px;
+border:1px solid #ddd
+}
+
+input[type=text],
+input[type=password] {
+  width: 300px;
+  padding: 6px;
+  box-sizing: border-box; /* важно для одинакового размера */
+}
+select{padding:6px}
+
+.servicesBox{
+background:#fafafa;
+padding:18px;
+border:1px solid #ddd
+}
+
+.servicesBoxServices {
+  max-width: 600px; /* или ширину как у input */
+  box-sizing: border-box;
+}
+
 </style>
 </head>
+
 <body>
+
 <header>ADMIN PANEL</header>
 
 <div class="tabs">
@@ -34,190 +99,679 @@ input[type="text"]{width:90%;padding:5px;} /* широкие поля ввода
 </div>
 
 <script>
+
 const API="http://localhost:8000"
 
-// ------------------ Услуги ------------------
+let windows=[]
+let operators=[]
+let services=[]
+let openedServicesRow=null
+
+async function fetchJSON(url){
+let r=await fetch(url)
+return r.json()
+}
+
+function setTable(html){
+document.getElementById("table").innerHTML=html
+}
+
+function setForm(html){
+document.getElementById("form").innerHTML=html
+}
+
+////////////////////////////////////////
+//////// УСЛУГИ
+////////////////////////////////////////
+
 async function loadServices(){
-    let res = await fetch(`${API}/services/`);
-    let data = await res.json();
+  services = await fetchJSON(`${API}/services/`);
 
-    let html = `
-    <tr>
-      <th>ID</th>
-      <th>Название</th>
-      <th>Действия</th>
-    </tr>
-    `;
+  let html = `<tr>
+    <th>ID</th>
+    <th>Название</th>
+    <th>Статус</th>
+    <th>Действия</th>
+  </tr>`;
 
-    for(let s of data){
-        html += `
-        <tr id="serviceRow-${s.id}">
-          <td>${s.id}</td>
-          <td id="serviceName-${s.id}">${s.name}</td>
-          <td class="actions">
-            <button onclick="editServiceName(${s.id}, '${s.name.replace(/'/g,"\\'")}')">Изменить имя</button>
-            <button onclick="saveServiceName(${s.id})" style="display:none;">Сохранить имя</button>
-            <button onclick="deleteService(${s.id})">Удалить</button>
-          </td>
-        </tr>
-        `;
-    }
+  for(let s of services){
+    html += `
+    <tr id="service-${s.id}">
+      <td>${s.id}</td>
+      <td>${s.name}</td>
+      <td>${s.status}</td>
+      <td>
+        <button onclick="editService(${s.id},'${s.name}')">Название</button>
+        <button onclick="editServiceStatus(${s.id}, '${s.status}')">Статус</button>
+        <button onclick="deleteService(${s.id})">Удалить</button>
+      </td>
+    </tr>`;
+  }
 
-    document.getElementById("table").innerHTML = html;
+  setTable(html);
 
-    document.getElementById("form").innerHTML = `
-      <div class="form">
-        <input type="text" id="newServiceName" placeholder="Название услуги">
-        <button onclick="addService()">Добавить услугу</button>
+  setForm(`
+    <div class="form">
+      <input id="newServiceName" placeholder="Название услуги">
+      <button onclick="addService()">Добавить услугу</button>
+    </div>
+  `);
+}
+
+function editServiceStatus(id, currentStatus) {
+  // если уже открыто для этой услуги — закрываем
+  if(openedServicesRow && openedServicesRow.dataset.type === "serviceStatus" && openedServicesRow.dataset.serviceId == id){
+    openedServicesRow.remove();
+    openedServicesRow = null;
+    return;
+  }
+
+  // закрываем любое другое открытое окно
+  openedServicesRow?.remove();
+  openedServicesRow = null;
+
+  let row = document.getElementById(`service-${id}`);
+
+  let html = `<tr class="serviceRow" data-service-id="${id}" data-type="serviceStatus">
+    <td></td>
+    <td></td>
+    <td></td>
+    <td>
+      <div class="servicesBox" style="max-width:200px; box-sizing:border-box;">
+        <select id="serviceStatus-${id}" style="width:100%; box-sizing:border-box;">
+          <option value="active" ${currentStatus === "active" ? "selected" : ""}>active</option>
+          <option value="inactive" ${currentStatus === "inactive" ? "selected" : ""}>inactive</option>
+        </select>
+        <button onclick="saveServiceStatus(${id})">Сохранить</button>
       </div>
-    `;
+    </td>
+  </tr>`;
+
+  row.insertAdjacentHTML("afterend", html);
+  openedServicesRow = row.nextElementSibling;
 }
 
-function editServiceName(id, currentName){
-    let cell = document.getElementById(`serviceName-${id}`);
-    cell.innerHTML = `<input type="text" id="serviceInput-${id}" value="${currentName}">`;
-    document.querySelector(`#serviceRow-${id} button[onclick^="saveServiceName"]`).style.display='inline';
+// функция сохранения статуса через эндпоинт
+async function saveServiceStatus(id){
+  const select = document.getElementById(`serviceStatus-${id}`);
+  const newStatus = select.value;
+
+  const res = await fetch(`${API}/services/${id}/status`, {
+    method: "PATCH",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({status: newStatus})
+  });
+
+  if(res.ok){
+    loadServices(); // обновляем таблицу
+  } else {
+    const err = await res.json();
+    alert("Ошибка: " + err.detail);
+  }
 }
 
-async function saveServiceName(id){
-    let input = document.getElementById(`serviceInput-${id}`);
-    let name = input.value.trim();
-    if(!name){ alert("Название не может быть пустым"); return; }
+function editService(id, name) {
+  // если уже открыто для этой услуги — закрываем
+  if(openedServicesRow && openedServicesRow.dataset.type === "service" && openedServicesRow.dataset.serviceId == id){
+    openedServicesRow.remove();
+    openedServicesRow = null;
+    return;
+  }
 
-    let res = await fetch(`${API}/services/${id}`,{
-        method:"PATCH",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({name})
-    });
+  // закрываем любое другое открытое окно
+  openedServicesRow?.remove();
+  openedServicesRow = null;
 
-    if(res.ok){
-        document.getElementById(`serviceName-${id}`).innerText = name;
-        document.querySelector(`#serviceRow-${id} button[onclick^="saveServiceName"]`).style.display='none';
-    } else {
-        alert("Ошибка при сохранении имени");
-    }
+  let row = document.getElementById(`service-${id}`);
+
+  let html = `<tr class="serviceRow" data-service-id="${id}" data-type="service">
+    <td></td>
+    <td></td>
+    <td></td>
+    <td>
+      <div class="servicesBox" style="max-width:500px; box-sizing:border-box;">
+        <input id="serviceInput-${id}" value="${name}" style="width:100%; box-sizing:border-box;">
+        <button onclick="saveService(${id})">Сохранить</button>
+      </div>
+    </td>
+  </tr>`;
+
+  row.insertAdjacentHTML("afterend", html);
+  openedServicesRow = row.nextElementSibling;
+}
+
+async function saveService(id){
+
+let name=document.getElementById(`serviceInput-${id}`).value
+
+await fetch(`${API}/services/${id}`,{
+method:"PATCH",
+headers:{"Content-Type":"application/json"},
+body:JSON.stringify({name})
+})
+
+loadServices()
 }
 
 async function deleteService(id){
-    if(!confirm("Удалить услугу?")) return;
-    let res = await fetch(`${API}/services/${id}`, {method:"DELETE"});
-    if(res.ok) loadServices();
-    else alert("Ошибка при удалении услуги");
+
+if(!confirm("Удалить?"))return
+
+await fetch(`${API}/services/${id}`,{method:"DELETE"})
+
+loadServices()
 }
 
 async function addService(){
-    let name = document.getElementById("newServiceName").value.trim();
-    if(!name){ alert("Введите название"); return; }
 
-    let res = await fetch(`${API}/services/`,{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({name})
-    });
+let name=document.getElementById("newServiceName").value.trim()
 
-    if(res.ok){
-        document.getElementById("newServiceName").value = "";
-        loadServices();
-    } else {
-        alert("Ошибка при добавлении услуги");
-    }
+if(!name)return alert("Введите название")
+
+await fetch(`${API}/services/`,{
+method:"POST",
+headers:{"Content-Type":"application/json"},
+body:JSON.stringify({name})
+})
+
+loadServices()
 }
 
-// ------------------ Другие вкладки ------------------
-async function loadWindows(){let res=await fetch(`${API}/windows/`);let data=await res.json();let html="<tr><th>ID</th><th>Название</th><th>Статус</th></tr>";for(let w of data){html+=`<tr><td>${w.id}</td><td>${w.name}</td><td>${w.status}</td></tr>`;}document.getElementById("table").innerHTML=html;document.getElementById("form").innerHTML="";}
-async function loadTickets(){let res=await fetch(`${API}/tickets/`);let data=await res.json();let html="<tr><th>ID</th><th>Service</th><th>Status</th></tr>";for(let t of data){html+=`<tr><td>${t.id}</td><td>${t.service_id}</td><td>${t.status}</td></tr>`;}document.getElementById("table").innerHTML=html;document.getElementById("form").innerHTML="";}
+////////////////////////////////////////
+//////// ОКНА
+////////////////////////////////////////
 
-// ------------------ Операторы ------------------
-let windows=[], operators=[];
-async function loadWindowsMeta(){let res=await fetch(`${API}/windows/`);windows=await res.json();}
-function getWindowName(id){let w=windows.find(x=>x.id===id);return w?w.name:"-";}
-function windowSelect(selected, operator_id){return `<select id="windowSelect-${operator_id}"><option value="">Нет окна</option>${windows.map(w=>`<option value="${w.id}" ${w.id===selected?"selected":""}>${w.name}</option>`).join("")}</select>`;}
+////////////////////////////////////////
+//////// ОКНА
+////////////////////////////////////////
+
+async function loadWindows() {
+    windows = await fetchJSON(`${API}/windows/`);
+
+    let html = `<tr>
+        <th>ID</th>
+        <th>Название</th>
+        <th>Статус</th>
+        <th></th>
+    </tr>`;
+
+    for (let w of windows) {
+        html += `
+        <tr id="window-${w.id}">
+            <td>${w.id}</td>
+            <td id="windowName-${w.id}">${w.name}</td>
+            <td id="windowStatus-${w.id}">${w.status}</td>
+            <td>
+                <button onclick="editWindow(${w.id},'${w.name}')">Название</button>
+                <button onclick="editWindowStatus(${w.id}, '${w.status}')">Статус</button>
+                <button onclick="deleteWindow(${w.id})">Удалить</button>
+            </td>
+        </tr>`;
+    }
+
+    setTable(html);
+
+    setForm(`
+    <div class="form">
+        <input id="newWindowName" placeholder="Название окна">
+        <button onclick="addWindow()">Добавить окно</button>
+    </div>
+    `);
+}
+
+function editWindowStatus(id, currentStatus) {
+  // если уже открыто для этого окна — закрываем
+  if (openedServicesRow && openedServicesRow.dataset.type === "status" && openedServicesRow.dataset.windowId == id) {
+    openedServicesRow.remove();
+    openedServicesRow = null;
+    return;
+  }
+
+  // закрываем любое другое открытое окно/строку статуса
+  openedServicesRow?.remove();
+  openedServicesRow = null;
+
+  let row = document.getElementById(`window-${id}`);
+  let html = `
+  <tr class="windowStatusRow" data-window-id="${id}" data-type="status">
+    <td></td>
+    <td></td>
+    <td></td>
+    <td>
+      <select id="windowStatusSelect-${id}">
+        <option value="online" ${currentStatus==="online"?"selected":""}>online</option>
+        <option value="offline" ${currentStatus==="offline"?"selected":""}>offline</option>
+      </select>
+	  <button onclick="saveWindowStatus(${id})">Сохранить</button>
+    </td>
+  </tr>
+  `;
+  row.insertAdjacentHTML("afterend", html);
+  openedServicesRow = row.nextElementSibling;
+}
+
+async function saveWindowStatus(id) {
+  let status = document.getElementById(`windowStatusSelect-${id}`).value;
+
+  let res = await fetch(`${API}/windows/${id}/status`, {
+    method: "PATCH",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({status})
+  });
+
+  if(!res.ok) return alert("Ошибка при обновлении статуса");
+
+  openedServicesRow.remove();
+  openedServicesRow = null;
+
+  loadWindows();
+}
+
+// Редактирование названия окна на строку ниже
+function editWindow(id, name) {
+	  // если уже открыто для этого окна — закрываем
+	  if(openedServicesRow && openedServicesRow.dataset.type === "window" && openedServicesRow.dataset.windowId == id){
+		openedServicesRow.remove();
+		openedServicesRow = null;
+		return;
+	  }
+
+	  // закрываем любое другое открытое окно
+	  openedServicesRow?.remove();
+	  openedServicesRow = null;
+	  
+    let row = document.getElementById(`window-${id}`);
+
+	let html = `
+	<tr class="windowEditRow" data-window-id="${id}" data-type="window">
+	  <td></td>
+	  <td></td>
+	  <td></td>
+	  <td>
+		<input id="windowInput-${id}" value="${name}" style="width:10%; box-sizing:border-box;">
+		<button onclick="saveWindow(${id})">Сохранить</button>
+	  </td>
+	</tr>
+	`;
+    row.insertAdjacentHTML("afterend", html);
+    openedServicesRow = row.nextElementSibling;
+}
+
+async function saveWindow(id){
+    let name = document.getElementById(`windowInput-${id}`).value.trim();
+    if(!name) return alert("Введите название окна");
+
+    await fetch(`${API}/windows/${id}`,{
+        method: "PATCH",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({name})
+    });
+
+    loadWindows();
+}
+
+// Добавление окна
+async function addWindow(){
+    let name = document.getElementById("newWindowName").value.trim();
+    if(!name) return alert("Введите название окна");
+
+    await fetch(`${API}/windows/`,{
+        method:"POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({name})
+    });
+
+    document.getElementById("newWindowName").value = "";
+    loadWindows();
+}
+
+// Удаление окна
+async function deleteWindow(id){
+    if(!confirm("Удалить окно?")) return;
+
+    await fetch(`${API}/windows/${id}`,{
+        method:"DELETE"
+    });
+
+    loadWindows();
+}
+
+function getWindowName(id){
+
+let w=windows.find(x=>x.id===id)
+return w?w.name:"-"
+}
+
+////////////////////////////////////////
+//////// ОПЕРАТОРЫ
+////////////////////////////////////////
 
 async function loadOperators(){
-  await loadWindowsMeta();
-  let res = await fetch(`${API}/operators/`);
-  operators = await res.json();
-  operators.sort((a,b)=>a.id-b.id);
 
-  let html=`<tr><th>ID</th><th>Имя</th><th>Окно</th><th>Действия</th></tr>`;
+windows=await fetchJSON(`${API}/windows/`)
+operators=await fetchJSON(`${API}/operators/`)
+services=await fetchJSON(`${API}/services/`)
 
-  for(let op of operators){
-    html+=`
+operators.sort((a,b)=>a.id-b.id)
+
+let html=`<tr>
+<th>ID</th>
+<th>Имя</th>
+<th>Окно</th>
+<th></th>
+</tr>`
+
+for(let op of operators){
+
+html+=`
 <tr id="row-${op.id}">
 <td>${op.id}</td>
-<td id="nameCell-${op.id}">${op.name}</td>
-<td id="windowCell-${op.id}">${getWindowName(op.window_id)}</td>
-<td class="actions">
-  <button onclick="editName(${op.id}, '${op.name.replace(/'/g,"\\'")}')">Изменить имя</button>
-  <button onclick="editWindow(${op.id},${op.window_id})">Изменить окно</button>
-  <button onclick="saveWindow(${op.id})" style="display:none;">Сохранить окно</button>
-  <button onclick="editServices(${op.window_id}, ${op.id})" ${!op.window_id ? 'disabled' : ''}>Изменить услуги</button>
-  <button onclick="saveServicesButton(${op.window_id}, ${op.id})" style="display:none;">Сохранить услуги</button>
-  <div id="servicesForm-${op.id}" style="margin-top:10px;"></div>
+
+<td id="name-${op.id}">
+${op.name}
 </td>
-</tr>`;
+
+<td id="window-${op.id}">
+${getWindowName(op.window_id)}
+</td>
+
+<td>
+
+<button onclick="editOperatorName(${op.id},'${op.name}')">
+Имя
+</button>
+
+<button onclick="editOperatorWindow(${op.id},${op.window_id})">
+Окно
+</button>
+
+<button onclick="editServices(${op.id},${op.window_id})"
+${!op.window_id?"disabled":""}>
+Услуги
+</button>
+
+<button onclick="editLoginPassword(${op.id})">
+Данные входа
+</button>
+
+</td>
+</tr>`
+}
+
+setTable(html)
+
+setForm(`
+<div class="form">
+  <input id="newOperatorName" placeholder="Имя оператора">
+  <input id="newOperatorLogin" placeholder="Логин">
+  <input id="newOperatorPassword" placeholder="Пароль">
+  <button onclick="addOperator()">Добавить</button>
+</div>
+`)
+}
+
+////////////////////////////////////////
+//////// имя оператора
+////////////////////////////////////////
+
+function editOperatorName(id,name){
+  // если уже открыто для этого оператора — закрываем
+  if(openedServicesRow && openedServicesRow.dataset.type === "name" && openedServicesRow.dataset.operatorId == id){
+    openedServicesRow.remove();
+    openedServicesRow = null;
+    return;
   }
-  document.getElementById("table").innerHTML=html;
-  document.getElementById("form").innerHTML="";
+
+  // закрываем любое другое открытое окно
+  openedServicesRow?.remove();
+  openedServicesRow = null;
+
+  let row = document.getElementById("row-"+id);
+
+  let html = '<tr class="nameRow" data-operator-id="'+id+'" data-type="name">' +
+             '<td></td><td></td><td></td>' +
+             '<td><input id="nameInput-'+id+'" value="'+name+'"> ' +
+             '<button onclick="saveOperatorName('+id+')">OK</button></td></tr>';
+
+  row.insertAdjacentHTML("afterend", html);
+
+  openedServicesRow = row.nextElementSibling;
 }
 
-function editName(id, currentName){
-    let cell=document.getElementById(`nameCell-${id}`);
-    cell.innerHTML=`<input type="text" id="nameInput-${id}" value="${currentName}"><button onclick="saveName(${id})">Сохранить имя</button>`;
+async function saveOperatorName(id){
+
+let name=document.getElementById(`nameInput-${id}`).value
+
+await fetch(`${API}/operators/${id}`,{
+method:"PATCH",
+headers:{"Content-Type":"application/json"},
+body:JSON.stringify({name})
+})
+
+loadOperators()
 }
-async function saveName(id){
-    let input=document.getElementById(`nameInput-${id}`);
-    let name=input.value;
-    let res=await fetch(`${API}/operators/${id}`,{
-        method:"PATCH",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({name})
+
+////////////////////////////////////////
+//////// окно оператора
+////////////////////////////////////////
+
+function editOperatorWindow(id,current){
+  if(openedServicesRow && openedServicesRow.dataset.type === "window" && openedServicesRow.dataset.operatorId == id){
+    openedServicesRow.remove();
+    openedServicesRow = null;
+    return;
+  }
+  openedServicesRow?.remove();
+
+  let html = '<tr class="windowRow" data-operator-id="'+id+'" data-type="window">' +
+             '<td></td><td></td><td></td>' +
+             '<td><select id="windowSelect-'+id+'">';
+  html += '<option value="">Нет окна</option>';
+  for(let w of windows){
+    html += '<option value="'+w.id+'" '+(w.id===current?"selected":"")+'>'+w.name+'</option>';
+  }
+  html += '</select> <button onclick="saveOperatorWindow('+id+')">OK</button></td></tr>';
+
+  let row = document.getElementById("row-"+id);
+  row.insertAdjacentHTML("afterend",html);
+
+  openedServicesRow = row.nextElementSibling;
+}
+
+async function saveOperatorWindow(id){
+
+let val=document.getElementById(`windowSelect-${id}`).value
+let window_id=val===""?null:parseInt(val)
+
+let r=await fetch(`${API}/operators/${id}`,{
+method:"PATCH",
+headers:{"Content-Type":"application/json"},
+body:JSON.stringify({window_id})
+})
+
+if(!r.ok)alert("Окно занято")
+
+loadOperators()
+}
+
+////////////////////////////////////////
+//////// услуги окна
+////////////////////////////////////////
+
+async function editServices(operator_id, window_id) {
+    if (openedServicesRow && openedServicesRow.dataset.operatorId == operator_id) {
+        openedServicesRow.remove();
+        openedServicesRow = null;
+        return;
+    }
+    openedServicesRow?.remove();
+    openedServicesRow = null;
+
+    let ws = await fetchJSON(API + "/window-services/" + window_id);
+    let selected = ws.map(x => x.service_id);
+
+    let html = '<tr id="servicesRow" data-operator-id="' + operator_id + '">' +
+               '<td></td><td></td><td></td>' + // пустые td для ID, Имя, Окно
+               '<td><div class="servicesBoxServices" style="max-width:600px">' +
+               '<b>Услуги окна</b><br><br>';
+
+    for (let s of services) {
+        let checked = selected.includes(s.id) ? "checked" : "";
+        html += '<label><input type="checkbox" value="' + s.id + '" ' + checked + '>' + s.name + '</label><br>';
+    }
+
+    html += '<br><button onclick="saveServices(' + window_id + ')">Сохранить</button>' +
+            '</div></td></tr>';
+
+    let row = document.getElementById("row-" + operator_id);
+    row.insertAdjacentHTML("afterend", html);
+
+    openedServicesRow = document.getElementById("servicesRow");
+}
+
+async function saveServices(window_id){
+
+let checks=openedServicesRow.querySelectorAll("input[type=checkbox]")
+
+let ids=[]
+
+checks.forEach(c=>{
+if(c.checked)ids.push(parseInt(c.value))
+})
+
+await fetch(`${API}/window-services/${window_id}`,{
+method:"PUT",
+headers:{"Content-Type":"application/json"},
+body:JSON.stringify(ids)
+})
+
+alert("Услуги обновлены")
+
+openedServicesRow.remove()
+openedServicesRow = null
+}
+
+////////////////////////////////////////
+//////// ДОБАВЛЕНИЕ ОПЕРАТОРА
+////////////////////////////////////////
+
+async function addOperator() {
+  let login = document.getElementById("newOperatorLogin").value.trim();
+  let password = document.getElementById("newOperatorPassword").value.trim();
+  let name = document.getElementById("newOperatorName").value.trim();
+
+  if (!login || !password || !name) return alert("Заполните все поля");
+
+  let res = await fetch(`${API}/operators/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ login, password, name, window_id: null })
+  });
+
+  if (!res.ok) {
+    let err = await res.text();
+    return alert("Ошибка при добавлении оператора: " + err);
+  }
+
+  // Очистка полей
+  document.getElementById("newOperatorLogin").value = "";
+  document.getElementById("newOperatorPassword").value = "";
+  document.getElementById("newOperatorName").value = "";
+
+  loadOperators();
+}
+////////////////////////////////////////
+//////// ОЧЕРЕДЬ
+////////////////////////////////////////
+
+async function loadTickets(){
+
+let tickets=await fetchJSON(`${API}/tickets/`)
+
+let html=`<tr>
+<th>ID</th>
+<th>Service</th>
+<th>Status</th>
+</tr>`
+
+for(let t of tickets){
+
+html+=`
+<tr>
+<td>${t.id}</td>
+<td>${t.service_id}</td>
+<td>${t.status}</td>
+</tr>`
+}
+
+setTable(html)
+setForm("")
+}
+
+async function editLoginPassword(operator_id) {
+    // Если окно уже открыто для этого оператора — закрываем его
+    if (openedServicesRow && openedServicesRow.dataset.operatorId == operator_id) {
+        openedServicesRow.remove();
+        openedServicesRow = null;
+        return;
+    }
+
+    // Закрываем любое другое открытое окно
+    openedServicesRow?.remove();
+    openedServicesRow = null;
+
+    // Получаем данные оператора
+    let op = operators.find(o => o.id === operator_id);
+    let currentLogin = op.login || "";
+    let currentPassword = op.password || ""; // чтобы пароль был виден
+
+let html = `
+<tr id="loginPassRow" data-operator-id="${operator_id}">
+<td></td>
+<td></td>
+<td></td>
+<td>
+<div class="servicesBox">
+<b>Сменить логин и пароль</b><br><br>
+<label><input id="loginInput-${operator_id}" value="${currentLogin}"></label><br>
+<label><input id="passwordInput-${operator_id}" value="${currentPassword}"></label><br><br>
+<button onclick="saveLoginPassword(${operator_id})">Сохранить</button>
+</div>
+</td>
+</tr>
+`;
+
+    let row = document.getElementById(`row-${operator_id}`);
+    row.insertAdjacentHTML("afterend", html);
+
+    openedServicesRow = document.getElementById("loginPassRow");
+}
+
+async function saveLoginPassword(operator_id) {
+    let login = document.getElementById(`loginInput-${operator_id}`).value.trim();
+    let password = document.getElementById(`passwordInput-${operator_id}`).value.trim();
+
+    if(!login || !password) return alert("Заполните оба поля");
+
+    let res = await fetch(`${API}/operators/${operator_id}/login`, {
+        method: "PUT", // предполагаем, что PUT эндпоинт для обновления данных
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({login, password})
     });
-    if(res.ok){document.getElementById(`nameCell-${id}`).innerText=name;}else{alert("Ошибка при сохранении имени");}
-}
 
-function editWindow(id,current){
-    let cell=document.getElementById(`windowCell-${id}`);
-    cell.innerHTML=windowSelect(current,id);
-    let btnSave=document.querySelector(`#row-${id} button[onclick^="saveWindow"]`);
-    btnSave.style.display='inline';
-}
-async function saveWindow(id){
-    let select=document.getElementById(`windowSelect-${id}`);
-    let window_id=select.value===""?null:parseInt(select.value);
-    let res=await fetch(`${API}/operators/${id}`,{
-        method:"PATCH",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({window_id})
-    });
-    if(res.ok){
-        document.getElementById(`windowCell-${id}`).innerText=window_id?getWindowName(window_id):"-";
-        document.querySelector(`#row-${id} button[onclick^="saveWindow"]`).style.display='none';
-        let btnServices=document.querySelector(`#row-${id} button[onclick^="editServices"]`);
-        btnServices.disabled=!window_id;
-    }else{alert("На это окно уже назначен оператор");}
-}
+    if(!res.ok){
+        let err = await res.text();
+        return alert("Ошибка при обновлении: " + err);
+    }
 
-async function editServices(window_id, operator_id){
-    if(!window_id){alert("Сначала назначьте окно");return;}
-    let services=await fetch(`${API}/services/`).then(r=>r.json());
-    let current=await fetch(`${API}/window-services/${window_id}`).then(r=>r.json());
-    let currentIds=current.map(x=>x.service_id);
-    let html=services.map(s=>`<label><input type="checkbox" value="${s.id}" ${currentIds.includes(s.id)?"checked":""}>${s.name}</label><br>`).join("");
-    document.getElementById(`servicesForm-${operator_id}`).innerHTML=html;
-    document.querySelector(`#row-${operator_id} button[onclick^="saveServicesButton"]`).style.display='inline';
-}
+    alert("Данные входа обновлены");
+    openedServicesRow.remove();
+    openedServicesRow = null;
 
-async function saveServicesButton(window_id, operator_id){
-    let checks=document.querySelectorAll(`#servicesForm-${operator_id} input[type=checkbox]`);
-    let selected=[...checks].filter(c=>c.checked).map(c=>parseInt(c.value));
-    let current=await fetch(`${API}/window-services/${window_id}`).then(r=>r.json());
-    for(let ws of current){if(!selected.includes(ws.service_id)){await fetch(`${API}/window-services/${window_id}/${ws.service_id}`,{method:"DELETE"});}}
-    for(let id of selected){if(!current.find(x=>x.service_id===id)){await fetch(`${API}/window-services/`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({window_id,service_id:id})});}}
-    document.getElementById(`servicesForm-${operator_id}`).innerHTML="";
-    document.querySelector(`#row-${operator_id} button[onclick^="saveServicesButton"]`).style.display='none';
+    loadOperators();
 }
 
 </script>
+
 </body>
 </html>
