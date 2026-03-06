@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Admin Panel</title>
+<style>
+body{font-family:Arial;background:#f4f4f4;margin:0;}
+header{background:#333;color:white;padding:15px;font-size:20px;}
+.tabs{display:flex;background:#ddd;}
+.tabs button{padding:12px 20px;border:none;background:#ddd;cursor:pointer;}
+.tabs button:hover{background:#ccc;}
+.content{padding:20px;}
+table{border-collapse:collapse;width:100%;background:white;}
+th,td{border:1px solid #ddd;padding:8px;text-align:left;}
+button{padding:6px 12px;cursor:pointer;margin-right:5px;}
+.actions button{margin-right:5px;}
+.form{margin-bottom:20px;background:white;padding:15px;border:1px solid #ddd;}
+input[type="text"]{width:90%;padding:5px;} /* широкие поля ввода */
+</style>
+</head>
+<body>
+<header>ADMIN PANEL</header>
+
+<div class="tabs">
+<button onclick="loadServices()">Услуги</button>
+<button onclick="loadWindows()">Окна</button>
+<button onclick="loadOperators()">Операторы</button>
+<button onclick="loadTickets()">Очередь</button>
+</div>
+
+<div class="content">
+<div id="form"></div>
+<table id="table"></table>
+</div>
+
+<script>
+const API="http://localhost:8000"
+
+// ------------------ Услуги ------------------
+async function loadServices(){
+    let res = await fetch(`${API}/services/`);
+    let data = await res.json();
+
+    let html = `
+    <tr>
+      <th>ID</th>
+      <th>Название</th>
+      <th>Действия</th>
+    </tr>
+    `;
+
+    for(let s of data){
+        html += `
+        <tr id="serviceRow-${s.id}">
+          <td>${s.id}</td>
+          <td id="serviceName-${s.id}">${s.name}</td>
+          <td class="actions">
+            <button onclick="editServiceName(${s.id}, '${s.name.replace(/'/g,"\\'")}')">Изменить имя</button>
+            <button onclick="saveServiceName(${s.id})" style="display:none;">Сохранить имя</button>
+            <button onclick="deleteService(${s.id})">Удалить</button>
+          </td>
+        </tr>
+        `;
+    }
+
+    document.getElementById("table").innerHTML = html;
+
+    document.getElementById("form").innerHTML = `
+      <div class="form">
+        <input type="text" id="newServiceName" placeholder="Название услуги">
+        <button onclick="addService()">Добавить услугу</button>
+      </div>
+    `;
+}
+
+function editServiceName(id, currentName){
+    let cell = document.getElementById(`serviceName-${id}`);
+    cell.innerHTML = `<input type="text" id="serviceInput-${id}" value="${currentName}">`;
+    document.querySelector(`#serviceRow-${id} button[onclick^="saveServiceName"]`).style.display='inline';
+}
+
+async function saveServiceName(id){
+    let input = document.getElementById(`serviceInput-${id}`);
+    let name = input.value.trim();
+    if(!name){ alert("Название не может быть пустым"); return; }
+
+    let res = await fetch(`${API}/services/${id}`,{
+        method:"PATCH",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({name})
+    });
+
+    if(res.ok){
+        document.getElementById(`serviceName-${id}`).innerText = name;
+        document.querySelector(`#serviceRow-${id} button[onclick^="saveServiceName"]`).style.display='none';
+    } else {
+        alert("Ошибка при сохранении имени");
+    }
+}
+
+async function deleteService(id){
+    if(!confirm("Удалить услугу?")) return;
+    let res = await fetch(`${API}/services/${id}`, {method:"DELETE"});
+    if(res.ok) loadServices();
+    else alert("Ошибка при удалении услуги");
+}
+
+async function addService(){
+    let name = document.getElementById("newServiceName").value.trim();
+    if(!name){ alert("Введите название"); return; }
+
+    let res = await fetch(`${API}/services/`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({name})
+    });
+
+    if(res.ok){
+        document.getElementById("newServiceName").value = "";
+        loadServices();
+    } else {
+        alert("Ошибка при добавлении услуги");
+    }
+}
+
+// ------------------ Другие вкладки ------------------
+async function loadWindows(){let res=await fetch(`${API}/windows/`);let data=await res.json();let html="<tr><th>ID</th><th>Название</th><th>Статус</th></tr>";for(let w of data){html+=`<tr><td>${w.id}</td><td>${w.name}</td><td>${w.status}</td></tr>`;}document.getElementById("table").innerHTML=html;document.getElementById("form").innerHTML="";}
+async function loadTickets(){let res=await fetch(`${API}/tickets/`);let data=await res.json();let html="<tr><th>ID</th><th>Service</th><th>Status</th></tr>";for(let t of data){html+=`<tr><td>${t.id}</td><td>${t.service_id}</td><td>${t.status}</td></tr>`;}document.getElementById("table").innerHTML=html;document.getElementById("form").innerHTML="";}
+
+// ------------------ Операторы ------------------
+let windows=[], operators=[];
+async function loadWindowsMeta(){let res=await fetch(`${API}/windows/`);windows=await res.json();}
+function getWindowName(id){let w=windows.find(x=>x.id===id);return w?w.name:"-";}
+function windowSelect(selected, operator_id){return `<select id="windowSelect-${operator_id}"><option value="">Нет окна</option>${windows.map(w=>`<option value="${w.id}" ${w.id===selected?"selected":""}>${w.name}</option>`).join("")}</select>`;}
+
+async function loadOperators(){
+  await loadWindowsMeta();
+  let res = await fetch(`${API}/operators/`);
+  operators = await res.json();
+  operators.sort((a,b)=>a.id-b.id);
+
+  let html=`<tr><th>ID</th><th>Имя</th><th>Окно</th><th>Действия</th></tr>`;
+
+  for(let op of operators){
+    html+=`
+<tr id="row-${op.id}">
+<td>${op.id}</td>
+<td id="nameCell-${op.id}">${op.name}</td>
+<td id="windowCell-${op.id}">${getWindowName(op.window_id)}</td>
+<td class="actions">
+  <button onclick="editName(${op.id}, '${op.name.replace(/'/g,"\\'")}')">Изменить имя</button>
+  <button onclick="editWindow(${op.id},${op.window_id})">Изменить окно</button>
+  <button onclick="saveWindow(${op.id})" style="display:none;">Сохранить окно</button>
+  <button onclick="editServices(${op.window_id}, ${op.id})" ${!op.window_id ? 'disabled' : ''}>Изменить услуги</button>
+  <button onclick="saveServicesButton(${op.window_id}, ${op.id})" style="display:none;">Сохранить услуги</button>
+  <div id="servicesForm-${op.id}" style="margin-top:10px;"></div>
+</td>
+</tr>`;
+  }
+  document.getElementById("table").innerHTML=html;
+  document.getElementById("form").innerHTML="";
+}
+
+function editName(id, currentName){
+    let cell=document.getElementById(`nameCell-${id}`);
+    cell.innerHTML=`<input type="text" id="nameInput-${id}" value="${currentName}"><button onclick="saveName(${id})">Сохранить имя</button>`;
+}
+async function saveName(id){
+    let input=document.getElementById(`nameInput-${id}`);
+    let name=input.value;
+    let res=await fetch(`${API}/operators/${id}`,{
+        method:"PATCH",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({name})
+    });
+    if(res.ok){document.getElementById(`nameCell-${id}`).innerText=name;}else{alert("Ошибка при сохранении имени");}
+}
+
+function editWindow(id,current){
+    let cell=document.getElementById(`windowCell-${id}`);
+    cell.innerHTML=windowSelect(current,id);
+    let btnSave=document.querySelector(`#row-${id} button[onclick^="saveWindow"]`);
+    btnSave.style.display='inline';
+}
+async function saveWindow(id){
+    let select=document.getElementById(`windowSelect-${id}`);
+    let window_id=select.value===""?null:parseInt(select.value);
+    let res=await fetch(`${API}/operators/${id}`,{
+        method:"PATCH",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({window_id})
+    });
+    if(res.ok){
+        document.getElementById(`windowCell-${id}`).innerText=window_id?getWindowName(window_id):"-";
+        document.querySelector(`#row-${id} button[onclick^="saveWindow"]`).style.display='none';
+        let btnServices=document.querySelector(`#row-${id} button[onclick^="editServices"]`);
+        btnServices.disabled=!window_id;
+    }else{alert("На это окно уже назначен оператор");}
+}
+
+async function editServices(window_id, operator_id){
+    if(!window_id){alert("Сначала назначьте окно");return;}
+    let services=await fetch(`${API}/services/`).then(r=>r.json());
+    let current=await fetch(`${API}/window-services/${window_id}`).then(r=>r.json());
+    let currentIds=current.map(x=>x.service_id);
+    let html=services.map(s=>`<label><input type="checkbox" value="${s.id}" ${currentIds.includes(s.id)?"checked":""}>${s.name}</label><br>`).join("");
+    document.getElementById(`servicesForm-${operator_id}`).innerHTML=html;
+    document.querySelector(`#row-${operator_id} button[onclick^="saveServicesButton"]`).style.display='inline';
+}
+
+async function saveServicesButton(window_id, operator_id){
+    let checks=document.querySelectorAll(`#servicesForm-${operator_id} input[type=checkbox]`);
+    let selected=[...checks].filter(c=>c.checked).map(c=>parseInt(c.value));
+    let current=await fetch(`${API}/window-services/${window_id}`).then(r=>r.json());
+    for(let ws of current){if(!selected.includes(ws.service_id)){await fetch(`${API}/window-services/${window_id}/${ws.service_id}`,{method:"DELETE"});}}
+    for(let id of selected){if(!current.find(x=>x.service_id===id)){await fetch(`${API}/window-services/`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({window_id,service_id:id})});}}
+    document.getElementById(`servicesForm-${operator_id}`).innerHTML="";
+    document.querySelector(`#row-${operator_id} button[onclick^="saveServicesButton"]`).style.display='none';
+}
+
+</script>
+</body>
+</html>

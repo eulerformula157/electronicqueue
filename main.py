@@ -72,6 +72,8 @@ class Service(Base):
     status = Column(String, default="inactive")
     last_window_id = Column(Integer, ForeignKey("windows.id"), nullable=True)
 
+class ServiceRename(BaseModel):
+    name: str
 
 class Ticket(Base):
     __tablename__ = "tickets"
@@ -92,7 +94,10 @@ class Operator(Base):
     name = Column(String, nullable=False)
     login = Column(String, unique=True, nullable=False)
     password = Column(String, nullable=False)
-    window_id = Column(Integer, nullable=True)
+    window_id = Column(Integer, ForeignKey("windows.id"), unique=True)
+
+class OperatorWindowUpdate(BaseModel):
+    window_id: int | None
     
 class Window(Base):
     __tablename__ = "windows"
@@ -113,7 +118,7 @@ class OperatorCreate(BaseModel):
     name: str
     login: str
     password: str
-    window_id: int
+    window_id: int | None = None
     
 class WindowCreate(BaseModel):
     name: str
@@ -144,10 +149,15 @@ class WindowStatusUpdate(BaseModel):
 # ------------------ Эндпоинты ------------------
 
 @app.post("/services/", tags=["Services"])
-def create_service(service: ServiceCreate):
+async def create_service(service: ServiceCreate):
     db = SessionLocal()
     db_service = Service(**service.dict())
     db.add(db_service)
+    
+    await manager.broadcast({
+        "type": "services_updated"
+    })    
+        
     db.commit()
     db.refresh(db_service)
     db.close()
@@ -156,9 +166,32 @@ def create_service(service: ServiceCreate):
 @app.get("/services/", tags=["Services"])
 def list_services():
     db = SessionLocal()
-    services = db.query(Service).all()
+    services = db.query(Service).order_by(Service.id).all()
     db.close()
     return services
+
+@app.patch("/services/{service_id}", tags=["Services"])
+async def rename_service(service_id: int, data: ServiceRename):
+    db = SessionLocal()
+
+    service = db.query(Service).filter(Service.id == service_id).first()
+
+    if not service:
+        db.close()
+        raise HTTPException(status_code=404, detail="Service not found")
+
+    service.name = data.name
+
+    db.commit()
+    
+    await manager.broadcast({
+        "type": "services_updated"
+    })    
+    
+    db.refresh(service)
+    db.close()
+
+    return service
   
 @app.post("/tickets/", tags=["Tickets"])
 async def create_ticket(ticket: TicketCreate):
@@ -437,9 +470,11 @@ def create_operator(operator: OperatorCreate):
 @app.get("/operators/", tags=["Operators"])
 def list_operators():
     db = SessionLocal()
-    operators = db.query(Operator).all()
+    operators = db.query(Operator).order_by(Operator.id).all()
     db.close()
     return operators
+
+
       
 @app.post("/windows/", tags=["Windows"])
 def create_window(window: WindowCreate):
@@ -454,18 +489,34 @@ def create_window(window: WindowCreate):
 @app.get("/windows/", tags=["Windows"])
 def list_windows():
     db = SessionLocal()
-    windows = db.query(Window).all()
+    windows = db.query(Window).order_by(Window.id).all()
     db.close()
     return windows
-   
-@app.post("/window-services/", response_model=WindowServiceRead, tags=["Windows"])
+
+
+@app.post("/window-services/", tags=["Windows"])
 def create_window_service(data: WindowServiceCreate):
     db = SessionLocal()
-    ws = WindowService(**data.dict())
+
+    existing = db.query(WindowService).filter_by(
+        window_id=data.window_id,
+        service_id=data.service_id
+    ).first()
+
+    if existing:
+        db.close()
+        return existing
+
+    ws = WindowService(
+        window_id=data.window_id,
+        service_id=data.service_id
+    )
+
     db.add(ws)
     db.commit()
     db.refresh(ws)
     db.close()
+
     return ws
 
 @app.get("/window-services/", response_model=List[WindowServiceRead], tags=["Windows"])
@@ -474,6 +525,41 @@ def list_window_services():
     result = db.query(WindowService).all()
     db.close()
     return result
+
+@app.get("/window-services/{window_id}", tags=["Windows"])
+def get_window_services(window_id: int):
+    db = SessionLocal()
+
+    services = (
+        db.query(WindowService)
+        .filter(WindowService.window_id == window_id)
+        .all()
+    )
+
+    db.close()
+    return services
+
+@app.delete("/window-services/{window_id}/{service_id}", tags=["Windows"])
+def delete_window_service(window_id: int, service_id: int):
+
+    db = SessionLocal()
+
+    ws = (
+        db.query(WindowService)
+        .filter(
+            WindowService.window_id == window_id,
+            WindowService.service_id == service_id
+        )
+        .first()
+    )
+
+    if ws:
+        db.delete(ws)
+        db.commit()
+
+    db.close()
+
+    return {"status":"ok"}
 
 @app.post("/login", tags=["Auth"])
 async def login(login: str = Body(...), password: str = Body(...)):
@@ -565,6 +651,90 @@ def get_current_ticket(operator_id: int):
         return {"ticket": ticket}
     finally:
         db.close()
+
+@app.delete("/services/{service_id}", tags=["Services"])
+async def delete_service(service_id: int):
+    db = SessionLocal()
+
+    service = db.query(Service).filter(Service.id == service_id).first()
+    if not service:
+        db.close()
+        raise HTTPException(status_code=404, detail="Service not found")
+
+    db.delete(service)
+
+    await manager.broadcast({
+        "type": "services_updated"
+    })
+
+    db.commit()
+    db.close()
+
+    return {"message": "Service deleted"}
+    
+@app.delete("/windows/{window_id}", tags=["Windows"])
+def delete_window(window_id: int):
+    db = SessionLocal()
+
+    window = db.query(Window).filter(Window.id == window_id).first()
+    if not window:
+        db.close()
+        raise HTTPException(status_code=404, detail="Window not found")
+
+    db.delete(window)
+    db.commit()
+    db.close()
+
+    return {"message": "Window deleted"}
+    
+@app.delete("/operators/{operator_id}", tags=["Operators"])
+def delete_operator(operator_id: int):
+    db = SessionLocal()
+
+    operator = db.query(Operator).filter(Operator.id == operator_id).first()
+    if not operator:
+        db.close()
+        raise HTTPException(status_code=404, detail="Operator not found")
+
+    db.delete(operator)
+    db.commit()
+    db.close()
+
+    return {"message": "Operator deleted"}
+    
+@app.delete("/tickets/{ticket_id}", tags=["Tickets"])
+def delete_ticket(ticket_id: int):
+    db = SessionLocal()
+
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        db.close()
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    db.delete(ticket)
+    db.commit()
+    db.close()
+
+    return {"message": "Ticket deleted"}
+    
+@app.patch("/operators/{operator_id}", tags=["Operators"])
+def update_operator(operator_id: int, data: dict):
+
+    db = SessionLocal()
+
+    op = db.query(Operator).filter(Operator.id == operator_id).first()
+
+    if "name" in data:
+        op.name = data["name"]
+
+    if "window_id" in data:
+        op.window_id = data["window_id"]
+
+    db.commit()
+    db.refresh(op)
+    db.close()
+
+    return op
 
 # ------------------ WebSocket Эндпоинты ------------------
 
