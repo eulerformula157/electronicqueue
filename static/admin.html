@@ -2,14 +2,14 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Admin Panel</title>
+<title>Управление Очередью</title>
 
 <style>
 
 body{font-family:Arial;background:#f4f4f4;margin:0}
 
 header{
-background:#333;
+background:#1490a3;
 color:white;
 padding:15px;
 font-size:20px
@@ -24,7 +24,7 @@ background:#ddd;
 cursor:pointer
 }
 
-.tabs button:hover{background:#ccc}
+.tabs button:hover{background:#1490a3}
 
 .content{padding:20px}
 
@@ -84,7 +84,7 @@ border:1px solid #ddd
 
 <body>
 
-<header>ADMIN PANEL</header>
+<header>Управление Очередью</header>
 
 <div class="tabs">
 <button onclick="loadServices()">Услуги</button>
@@ -292,7 +292,7 @@ async function loadWindows() {
         <th>ID</th>
         <th>Название</th>
         <th>Статус</th>
-        <th></th>
+        <th>Действия</th>
     </tr>`;
 
     for (let w of windows) {
@@ -458,7 +458,7 @@ let html=`<tr>
 <th>ID</th>
 <th>Имя</th>
 <th>Окно</th>
-<th></th>
+<th>Действия</th>
 </tr>`
 
 for(let op of operators){
@@ -687,19 +687,22 @@ async function addOperator() {
 async function loadTickets(){
 
 let tickets=await fetchJSON(`${API}/tickets/`)
+let services=await fetchJSON(`${API}/services/`)
 
 let html=`<tr>
-<th>ID</th>
-<th>Service</th>
-<th>Status</th>
+<th>Номер</th>
+<th>Услуга</th>
+<th>Статус</th>
 </tr>`
 
 for(let t of tickets){
 
+let service = services.find(s => s.id === t.service_id)
+
 html+=`
 <tr>
-<td>${t.id}</td>
-<td>${t.service_id}</td>
+<td>${t.number}</td>
+<td>${service ? service.name : "Unknown"}</td>
 <td>${t.status}</td>
 </tr>`
 }

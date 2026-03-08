@@ -40,8 +40,16 @@ class ConnectionManager:
         self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
+        dead = []
+
         for connection in self.active_connections:
-            await connection.send_json(message)
+            try:
+                await connection.send_json(message)
+            except:
+                dead.append(connection)
+
+        for conn in dead:
+            self.disconnect(conn)
 
 
 manager = ConnectionManager()   
@@ -147,7 +155,7 @@ class WindowServiceRead(BaseModel):
     class Config:
         from_attributes = True
 
-class WindowStatusUpdate(BaseModel):
+class WindowStatusUpdateOp(BaseModel):
     window_id: int
     status: str  # "online" или "offline"
 
@@ -693,7 +701,7 @@ async def login(login: str = Body(...), password: str = Body(...)):
         db.close()
 
 @app.post("/windows/update-status", tags=["Windows"])
-async def update_window_status(data: WindowStatusUpdate):
+async def update_window_status(data: WindowStatusUpdateOp):
     db = SessionLocal()
     try:
         window = db.query(Window).filter(Window.id == data.window_id).first()
@@ -729,6 +737,8 @@ def get_current_ticket(operator_id: int):
             .first()
         )
         if not ticket:
+            db.close()
+            #return {"detail": "Нет текущего клиента"}
             return {"ticket": None}
         return {"ticket": ticket}
     finally:
@@ -878,6 +888,41 @@ async def websocket_terminal(websocket: WebSocket):
             await websocket.receive_text()  # держим соединение
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+
+@app.websocket("/ws/terminal/{operator_id}")
+async def websocket_terminal(websocket: WebSocket, operator_id: int):
+    await manager.connect(websocket)
+
+    try:
+        while True:
+            await websocket.receive_text()
+
+    except WebSocketDisconnect:
+
+        manager.disconnect(websocket)
+
+        db = SessionLocal()
+
+        operator = db.query(Operator).filter(Operator.id == operator_id).first()
+
+        if operator and operator.window_id:
+            window = db.query(Window).filter(Window.id == operator.window_id).first()
+
+            if window:
+                window.status = "offline"
+                db.commit()
+
+                # пересчитать услуги
+                update_services_status_for_window(db, window.id)
+
+        db.close()
+
+        # уведомляем терминалы
+        await manager.broadcast({
+            "type": "services_updated"
+        })
+
 
 @app.websocket("/ws/board")
 async def websocket_board(websocket: WebSocket):

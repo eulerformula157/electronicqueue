@@ -250,7 +250,7 @@ if (!operatorId) {
 }
 
 // ==================== WebSocket ====================
-const socket = new WebSocket("ws://localhost:8000/ws/terminal");
+const socket = new WebSocket(`ws://localhost:8000/ws/terminal/${operatorId}`);
 
 socket.onopen = () => {
     console.log("WebSocket подключен");
