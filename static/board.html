@@ -5,93 +5,77 @@
 <title>Табло очереди</title>
 
 <style>
-html, body {
-    height: 100%;
-    margin: 0;
-    font-family: "Segoe UI", Arial, sans-serif;
-    background: #f2f2f2;
-    color: #333;
-    overflow: hidden;
+html,body{
+height:100%;
+margin:0;
+font-family:"Segoe UI",Arial,sans-serif;
+background:#f2f2f2;
+overflow:hidden;
 }
 
-/* ===== Заголовок ===== */
-h1 {
-    text-align: center;
-    margin: 20px 0;
-    font-weight: 600;
+h1{
+text-align:center;
+margin:20px 0;
 }
 
-/* ===== Кнопка TV ===== */
-.tv-btn {
-    position: absolute;
-    top: 15px;
-    left: 15px;
-    padding: 8px 14px;
-    border-radius: 6px;
-    border: none;
-    cursor: pointer;
-    background: #2d89ef;
-    color: white;
-    font-weight: 600;
+.tv-btn{
+position:absolute;
+top:15px;
+left:15px;
+padding:8px 14px;
+border:none;
+border-radius:6px;
+background:#2d89ef;
+color:white;
+cursor:pointer;
 }
 
-.tv-btn:hover {
-    background: #1b6fd8;
+.board-wrapper{
+height:calc(100vh - 80px);
+padding:0 40px 30px 40px;
 }
 
-/* ===== Таблица ===== */
-.board-wrapper {
-    height: calc(100vh - 80px);
-    padding: 0 40px 30px 40px;
+table{
+width:100%;
+height:100%;
+border-collapse:collapse;
+text-align:center;
+table-layout:fixed;
 }
 
-table {
-    width: 100%;
-    height: 100%;
-    border-collapse: collapse;
-    text-align: center;
-    table-layout: fixed;
+thead{
+background:#2d89ef;
+color:white;
 }
 
-thead {
-    background: #2d89ef;
-    color: white;
+th{
+padding:15px;
+font-size:20px;
 }
 
-th {
-    padding: 15px;
-    font-size: 20px;
+td{
+font-weight:600;
+border-bottom:1px solid #ddd;
 }
 
-tbody {
-    height: 100%;
+tr:last-child td{
+border-bottom:none;
 }
 
-td {
-    font-weight: 600;
-    border-bottom: 1px solid #ddd;
+.status-indicator{
+position:fixed;
+bottom:10px;
+right:15px;
+font-size:14px;
+opacity:0.6;
 }
 
-tr:last-child td {
-    border-bottom: none;
+.tv-mode th{
+font-size:36px;
 }
 
-/* ===== Статус WS ===== */
-.status-indicator {
-    position: fixed;
-    bottom: 10px;
-    right: 15px;
-    font-size: 14px;
-    opacity: 0.6;
-}
-
-/* ===== TV режим ===== */
-.tv-mode th {
-    font-size: 36px;
-}
-
-.tv-mode td {
-    font-weight: 700;
+.tv-mode td{
+font-weight:700;
 }
 </style>
 </head>
@@ -103,107 +87,188 @@ tr:last-child td {
 
 <div class="board-wrapper">
 <table>
-    <thead>
-        <tr>
-            <th>ОКНО</th>
-            <th>ТАЛОН</th>
-        </tr>
-    </thead>
-    <tbody id="board-body"></tbody>
+<thead>
+<tr>
+<th>ОКНО</th>
+<th>ТАЛОН</th>
+</tr>
+</thead>
+<tbody id="board-body"></tbody>
 </table>
 </div>
 
 <div class="status-indicator" id="ws-status">WS: connecting...</div>
 
 <script>
+
 const WS_URL = "ws://localhost:8000/ws/board";
+
+let ws;
 let previousTickets = [];
+let initialized = false;
 
-/* ===== WebSocket ===== */
-function connectWS() {
-    const ws = new WebSocket(WS_URL);
+/* ================= WEBSOCKET ================= */
 
-    ws.onopen = () => {
-        document.getElementById("ws-status").textContent = "WS: connected";
-    };
+function connectWS(){
 
-    ws.onclose = () => {
-        document.getElementById("ws-status").textContent = "WS: reconnecting...";
-        setTimeout(connectWS, 3000);
-    };
+ws = new WebSocket(WS_URL);
 
-    ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        updateBoard(data);
-    };
+ws.onopen = () => {
+document.getElementById("ws-status").textContent = "WS: connected";
+};
+
+ws.onclose = () => {
+document.getElementById("ws-status").textContent = "WS: reconnecting...";
+setTimeout(connectWS,3000);
+};
+
+ws.onmessage = handleMessage;
+
 }
 
 connectWS();
 
-/* ===== Обновление табло ===== */
-function updateBoard(tickets) {
-    const tbody = document.getElementById("board-body");
-    tbody.innerHTML = "";
 
-    tickets.forEach(t => {
-        const row = document.createElement("tr");
-        row.innerHTML = `
-            <td>${t.window_name}</td>
-            <td>${t.number}</td>
-        `;
-        tbody.appendChild(row);
-    });
+/* ================= MESSAGE ================= */
 
-    previousTickets = tickets;
-    autoScaleRows();
+function handleMessage(event){
+
+const data = JSON.parse(event.data);
+
+const tickets = data.tickets || data;
+
+tickets.forEach(ticket => {
+
+const isNew = !previousTickets.find(t => t.id === ticket.id);
+
+if(initialized && isNew){
+
+//playSound();
+
+setTimeout(()=>{
+speakTicket(ticket);
+},700);
+
 }
 
-/* ===== Автомасштаб строк ===== */
-function autoScaleRows() {
-    const rows = document.querySelectorAll("#board-body tr");
-    if (rows.length === 0) return;
+});
 
-    const headerHeight = document.querySelector("thead").offsetHeight;
-    const availableHeight = window.innerHeight - headerHeight - 120;
+previousTickets = tickets;
 
-    const rowHeight = availableHeight / rows.length;
+updateBoard(tickets);
 
-    rows.forEach(row => {
-        row.style.height = rowHeight + "px";
-        row.style.fontSize = Math.max(rowHeight * 0.4, 14) + "px";
-    });
+initialized = true;
+
 }
 
-window.addEventListener("resize", autoScaleRows);
 
-/* ===== Звук ===== */
-const callSound = new Audio("/static/sounds/ding.mp3");
-let soundEnabled = false;
+/* ================= BOARD ================= */
 
-document.body.addEventListener("click", () => {
-    callSound.play().then(() => {
-        callSound.pause();
-        callSound.currentTime = 0;
-        soundEnabled = true;
-    }).catch(() => {});
-}, { once: true });
+function updateBoard(tickets){
 
-function playSound() {
-    if (!soundEnabled) return;
-    callSound.currentTime = 0;
-    callSound.play();
+const tbody = document.getElementById("board-body");
+tbody.innerHTML = "";
+
+tickets.forEach(t=>{
+
+const row = document.createElement("tr");
+
+row.innerHTML=`
+<td>${t.window_name}</td>
+<td>${t.number}</td>
+`;
+
+tbody.appendChild(row);
+
+});
+
+autoScaleRows();
+
 }
 
-/* ===== TV режим ===== */
-function toggleTV() {
-    document.body.classList.toggle("tv-mode");
 
-    if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen();
-    } else {
-        document.exitFullscreen();
-    }
+/* ================= AUTO SCALE ================= */
+
+function autoScaleRows(){
+
+const rows=document.querySelectorAll("#board-body tr");
+
+if(rows.length===0) return;
+
+const headerHeight=document.querySelector("thead").offsetHeight;
+
+const availableHeight=window.innerHeight-headerHeight-120;
+
+const rowHeight=availableHeight/rows.length;
+
+rows.forEach(row=>{
+row.style.height=rowHeight+"px";
+row.style.fontSize=Math.max(rowHeight*0.4,16)+"px";
+});
+
 }
+
+window.addEventListener("resize",autoScaleRows);
+
+
+/* ================= SOUND ================= */
+
+//const callSound=new Audio("/static/sounds/ding.mp3");
+
+let soundEnabled=false;
+
+document.body.addEventListener("click",()=>{
+
+callSound.play().then(()=>{
+callSound.pause();
+callSound.currentTime=0;
+soundEnabled=true;
+});
+
+},{once:true});
+
+
+function playSound(){
+
+if(!soundEnabled) return;
+
+callSound.currentTime=0;
+callSound.play();
+
+}
+
+
+/* ================= VOICE ================= */
+
+function speakTicket(ticket){
+
+const text=`Талон ${ticket.number}. Подойдите к окну ${ticket.window_name}`;
+
+const utterance=new SpeechSynthesisUtterance(text);
+
+utterance.lang="ru-RU";
+utterance.rate=0.9;
+utterance.pitch=1;
+
+speechSynthesis.speak(utterance);
+
+}
+
+
+/* ================= TV MODE ================= */
+
+function toggleTV(){
+
+document.body.classList.toggle("tv-mode");
+
+if(!document.fullscreenElement){
+document.documentElement.requestFullscreen();
+}else{
+document.exitFullscreen();
+}
+
+}
+
 </script>
 
 </body>
