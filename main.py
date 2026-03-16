@@ -1,5 +1,5 @@
 # main.py
-from fastapi import FastAPI, HTTPException, Body, Header
+from fastapi import FastAPI, HTTPException, Body, Header, Depends, status
 from pydantic import BaseModel
 from sqlalchemy import Column, Integer, String, ForeignKey, TIMESTAMP, text
 from sqlalchemy.orm import declarative_base
@@ -18,7 +18,6 @@ from datetime import datetime
 from sqlalchemy import text
 import asyncio
 import secrets
-
 
 DATABASE_URL = "postgresql://postgres:password@localhost:5432/postgres"
 
@@ -55,6 +54,53 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()   
+
+
+class OperatorConnectionManager:
+    def __init__(self):
+        # ключ = operator_id, значение = WebSocket
+        self.connections: dict[int, WebSocket] = {}
+
+    async def connect(self, operator_id: int, websocket: WebSocket):
+        await websocket.accept()
+        self.connections[operator_id] = websocket
+
+    def disconnect(self, operator_id: int):
+        if operator_id in self.connections:
+            del self.connections[operator_id]
+
+    async def send_to_operator(self, operator_id: int, message: dict):
+        ws = self.connections.get(operator_id)
+        if ws:
+            try:
+                await ws.send_json(message)
+            except:
+                self.disconnect(operator_id)
+
+    async def broadcast(self, message: dict):
+        dead = []
+        for operator_id, connection in self.connections.items():
+            try:
+                await connection.send_json(message)
+            except:
+                dead.append(operator_id)
+        for oid in dead:
+            self.disconnect(oid)
+
+operatorManager = OperatorConnectionManager()
+
+def verify_session(session_id: str = Header(...)):
+    db = SessionLocal()
+    try:
+        session = db.query(UserSession).filter(UserSession.session_id == session_id).first()
+        if not session:
+            raise HTTPException(status_code=401, detail="Invalid session")
+        operator = db.query(Operator).filter(Operator.id == session.operator_id).first()
+        if not operator:
+            raise HTTPException(status_code=401, detail="Operator not found")
+        return operator
+    finally:
+        db.close()
 
 # Разрешение для CORS
 
@@ -270,27 +316,9 @@ async def create_ticket(ticket: TicketCreate):
         db.close()
         return {"error": "No windows available for this service"}
 
-    # Round-robin выбор окна
-    #next_window = windows[0]
 
-    #if service.last_window_id:
-    #    for i, w in enumerate(windows):
-    #        if w.id == service.last_window_id:
-    #            next_window = windows[(i + 1) % len(windows)]
-    #            break
-
-    # Обновляем last_window_id
-    #service.last_window_id = next_window.id
-
-    # Генерация номера
-    #last_ticket = db.query(Ticket).order_by(Ticket.number.desc()).first()
-    #next_number = 1 if not last_ticket else last_ticket.number + 1
-
-    # Создаём тикет
     db_ticket = Ticket(
         service_id=service.id,
-        #number=next_number,
-        #window_id=next_window.id,
         status="waiting"
     )
 
@@ -306,11 +334,10 @@ async def create_ticket(ticket: TicketCreate):
     return db_ticket
      
 @app.post("/tickets/finish", tags=["Tickets"])
-async def finish_ticket(session_id: str = Header(...)):
+async def finish_ticket(operator: Operator = Depends(verify_session)):
     db = SessionLocal()
 
-    operator = get_operator_by_session(db, session_id)
-    if not operator or not operator.window_id:
+    if not operator.window_id:
         db.close()
         raise HTTPException(status_code=404, detail="Operator or window not found")
     
@@ -323,10 +350,6 @@ async def finish_ticket(session_id: str = Header(...)):
         db.close()
         return {"detail": "Нет текущего клиента"}
 
-    await manager.broadcast({
-        "type": "queue_updated"
-    })
-
     # Завершаем тикет
     ticket.status = "finished"
     ticket.finished_at = text("CURRENT_TIMESTAMP")
@@ -337,20 +360,14 @@ async def finish_ticket(session_id: str = Header(...)):
     return ticket
 
 @app.post("/tickets/next", tags=["Tickets"])
-async def call_next_ticket(session_id: str = Header(...)):
+async def call_next_ticket(operator: Operator = Depends(verify_session)):
     db = SessionLocal()
-
-    # получаем оператора из session
-    operator = get_operator_by_session(db, session_id)
-    if not operator:
-        db.close()
-        raise HTTPException(status_code=404, detail="Operator not found")
 
     if not operator.window_id:
         db.close()
         return {"detail": "Оператору не назначено окно"}
 
-    # 2. Проверяем, не обслуживается ли уже клиент
+    # Проверяем, не обслуживается ли уже клиент
     current = db.query(Ticket).filter(
         Ticket.window_id == operator.window_id,
         Ticket.status == "called"
@@ -360,7 +377,7 @@ async def call_next_ticket(session_id: str = Header(...)):
         db.close()
         return {"detail": f"Сначала завершите клиента: {current.number}"}
 
-    # 3. Получаем услуги этого окна
+    # Получаем услуги этого окна
     window_services = db.query(WindowService).filter(
         WindowService.window_id == operator.window_id
     ).all()
@@ -371,7 +388,7 @@ async def call_next_ticket(session_id: str = Header(...)):
         db.close()
         return {"detail": "У окна нет назначенных услуг"}
 
-    # 4. Ищем **самый долгождущий** билет среди услуг окна
+    # Ищем самый долгождущий билет среди услуг окна
     ticket = db.query(Ticket)\
         .filter(
             Ticket.status == "waiting",
@@ -384,7 +401,7 @@ async def call_next_ticket(session_id: str = Header(...)):
         db.close()
         return {"detail": "Нет ожидающих билетов"}
 
-    # 5. Назначаем билет окну
+    # Назначаем билет окну
     ticket.status = "called"
     ticket.window_id = operator.window_id
     ticket.called_at = text("CURRENT_TIMESTAMP")
@@ -397,16 +414,14 @@ async def call_next_ticket(session_id: str = Header(...)):
     return ticket
 
 @app.get("/tickets/my-queue", tags=["Tickets"])
-def get_my_queue(session_id: str = Header(...)):
+def get_my_queue(operator: Operator = Depends(verify_session)):
     db = SessionLocal()
 
-    operator = get_operator_by_session(db, session_id)
-    
     if not operator.window_id:
         db.close()
         return []
 
-    # 2. Получаем услуги, которые назначены на окно оператора
+    # Получаем услуги, которые назначены на окно оператора
     window_services = db.query(WindowService).filter(
         WindowService.window_id == operator.window_id
     ).all()
@@ -416,15 +431,11 @@ def get_my_queue(session_id: str = Header(...)):
         db.close()
         return []
 
-    # 3. Берём только тикеты, которые:
-    #    - статус "waiting"
-    #    - относятся к услугам этого окна
-    #    - назначены на это окно (window_id совпадает)
+    # Берём тикеты в статусе "waiting", относящиеся к услугам окна
     tickets = db.query(Ticket)\
         .filter(
             Ticket.status == "waiting",
-            Ticket.service_id.in_(service_ids),
-            #Ticket.window_id == operator.window_id  # <-- фильтр по окну
+            Ticket.service_id.in_(service_ids)
         )\
         .order_by(Ticket.created_at)\
         .all()
@@ -661,10 +672,9 @@ class LoginRequest(BaseModel):
     password: str
 
 @app.post("/login", tags=["Auth"])
-async def login(data: LoginRequest): # Принимаем модель
+async def login(data: LoginRequest):
     db = SessionLocal()
     try:
-        # Обращаемся через data.login и data.password
         operator = db.query(Operator).filter(
             Operator.login == data.login, 
             Operator.password == data.password
@@ -680,23 +690,28 @@ async def login(data: LoginRequest): # Принимаем модель
             created_at=datetime.now()
         )
         db.add(new_session)
-        # Делаем окно онлайн (ваш существующий код)
+        
+        # Логика онлайн-статуса
         if operator.window_id:
             window = db.query(Window).filter(Window.id == operator.window_id).first()
             if window:
                 window.status = "online"
+                # ВАЖНО: сначала сохраняем изменения в БД
+                db.flush() 
+                
+                # Теперь обновляем услуги и уведомляем
                 update_services_status_for_window(db, window.id)
-
-        db.commit()
-
-        # Используйте operator.window_id вместо просто window_id
-        if operator.window_id:
-            # статус сервисов мы уже обновили выше внутри try, 
-            # тут можно просто отправить уведомление в WebSocket
-            await manager.broadcast({
-                "type": "services_updated",
-                "window_id": operator.window_id
-            })
+                
+                # Фиксируем изменения в БД
+                db.commit()
+                
+                # Уведомляем клиентов через WebSocket
+                await manager.broadcast({
+                    "type": "services_updated",
+                    "window_id": operator.window_id
+                })
+        else:
+            db.commit() # Если окна нет, просто коммитим сессию
 
         return {
             "session_id": token,
@@ -704,23 +719,87 @@ async def login(data: LoginRequest): # Принимаем модель
             "window_id": operator.window_id
         }
 
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+@app.post("/logout")
+async def logout(session_id: str = Header(...)):
+    db: Session = SessionLocal()
+    try:
+        # 1. Сначала находим текущую сессию, чтобы узнать ID оператора
+        current_session = db.query(UserSession).filter(UserSession.session_id == session_id).first()
+        
+        if current_session:
+            operator_id = current_session.operator_id
+            
+            # 2. Находим оператора и его окно
+            operator = db.query(Operator).filter(Operator.id == operator_id).first()
+            if operator and operator.window_id:
+                window = db.query(Window).filter(Window.id == operator.window_id).first()
+                if window:
+                    # Меняем статус окна
+                    window.status = "offline"
+                    db.commit()
+                    
+                    # Обновляем услуги
+                    update_services_status_for_window(db, window.id)
+                    await manager.broadcast({"type": "services_updated"})
+            
+            # 3. Удаляем ВСЕ сессии этого оператора
+            db.query(UserSession).filter(UserSession.operator_id == operator_id).delete()
+            db.commit()
+            
+        return {"status": "success"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
 
 @app.get("/auth/me", tags=["Auth"])
-def get_me(session_id: str = Header(...)):
-    db = SessionLocal()
-    session = db.query(UserSession).filter(UserSession.session_id == session_id).first()
-    if not session:
-        db.close()
-        raise HTTPException(status_code=401, detail="Invalid session")
+def get_me(operator: Operator = Depends(verify_session)):
+    return {
+        "operator_id": operator.id,
+        "name": operator.name,
+        "window_id": operator.window_id
+    }
+
+def get_operator_by_session(session_id: str = Header(..., alias="session-id")):
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Нет session_id")
     
-    operator = db.query(Operator).filter(Operator.id == session.operator_id).first()
-    db.close()
-    return {"operator_id": operator.id, "name": operator.name, "window_id": operator.window_id}
+    db = SessionLocal()
+    try:
+        # ищем сессию
+        session_obj = db.query(UserSession).filter(UserSession.session_id == session_id).first()
+        if not session_obj:
+            raise HTTPException(status_code=401, detail="Неверный токен")
+
+        # достаем оператора
+        operator = db.query(Operator).filter(Operator.id == session_obj.operator_id).first()
+        if not operator:
+            raise HTTPException(status_code=404, detail="Operator not found")
+
+        return operator
+    finally:
+        db.close()
+
 
 @app.post("/windows/update-status", tags=["Windows"])
-async def update_window_status(data: WindowStatusUpdateOp):
+async def update_window_status(
+    data: WindowStatusUpdateOp,
+    operator: Operator = Depends(get_operator_by_session)
+):
+    # проверяем, что оператор меняет своё окно
+    if operator.window_id != data.window_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Вы не можете менять статус чужого окна"
+        )
+
     db = SessionLocal()
     try:
         window = db.query(Window).filter(Window.id == data.window_id).first()
@@ -730,26 +809,21 @@ async def update_window_status(data: WindowStatusUpdateOp):
         window.status = data.status.lower()
         db.commit()
 
-        # пересчитываем только связанные услуги
+        # пересчитываем статусы связанных услуг
         update_services_status_for_window(db, window.id)
-        
-        
-        await manager.broadcast({
-            "type": "services_updated"
-        })
+
+        # уведомление фронта
+        await manager.broadcast({"type": "services_updated"})
 
         db.refresh(window)
         return window
-
     finally:
         db.close()
 
 @app.get("/tickets/current", tags=["Tickets"])
-def get_current_ticket(session_id: str = Header(...)):
+def get_current_ticket(operator: Operator = Depends(verify_session)):
     db = SessionLocal()
     try:
-        operator = get_operator_by_session(db, session_id)
-
         if not operator.window_id:
             return {"ticket": None}
 
@@ -907,41 +981,28 @@ def update_operator_login(operator_id: int = Path(..., gt=0), data: OperatorLogi
 # ------------------ WebSocket Эндпоинты ------------------
 
 @app.websocket("/ws/terminal")
-async def websocket_terminal(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket):
+    db: Session = SessionLocal()
     await manager.connect(websocket)
     try:
         while True:
-            await websocket.receive_text()  # держим соединение
+            # Получаем ЛЮБОЕ сообщение от кого угодно
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            
+            # Обрабатываем типы сообщений
+            if message.get("type") == "queue_updated":
+                # Рассылаем всем подключенным (и операторам, и терминалам)
+                await manager.broadcast({"type": "queue_updated"})
+            
+            elif message.get("type") == "services_updated":
+                await manager.broadcast({"type": "services_updated"})
+                
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-
-@app.websocket("/ws/terminal/{operator_id}")
-async def websocket_terminal(websocket: WebSocket, operator_id: int):
-    await manager.connect(websocket)
-
-    try:
-        while True:
-            await websocket.receive_text()
-
-    except WebSocketDisconnect:
-
-        manager.disconnect(websocket)
-
-        db = SessionLocal()
-
-        operator = db.query(Operator).filter(Operator.id == operator_id).first()
-
-        if operator and operator.window_id:
-            window = db.query(Window).filter(Window.id == operator.window_id).first()
-
-            if window:
-                window.status = "offline"
-                db.commit()
-
-                # пересчитать услуги
-                update_services_status_for_window(db, window.id)
-
+        
+    
         db.close()
 
         # уведомляем терминалы
@@ -964,20 +1025,56 @@ async def websocket_board(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
         
+
 @app.websocket("/ws/operator/{operator_id}")
 async def websocket_operator(websocket: WebSocket, operator_id: int):
-    await manager.connect(websocket)
+    db = SessionLocal()
+    await websocket.accept()
     try:
+        # подключаем оператора к менеджеру
+        await operatorManager.connect(operator_id, websocket)
+
         # при подключении сразу отправляем текущие данные
         operator_data = get_operator_state(operator_id)
         await websocket.send_json(operator_data)
 
+        # держим соединение живым
         while True:
-            await websocket.receive_text()  # держим соединение живым
+            try:
+                await websocket.receive_text()
+            except WebSocketDisconnect:
+                print(f"Оператор {operator_id} отключился")
+                break  # выходим из цикла
 
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
+    except Exception as e:
+        print(f"Ошибка в websocket_operator: {e}")
 
+    finally:
+        # всегда выполняем отсоединение и очистку базы
+        operatorManager.disconnect(operator_id)
+
+        try:
+            # удаляем все сессии этого оператора
+            sessions = db.query(UserSession).filter(UserSession.operator_id == operator_id).all()
+            for s in sessions:
+                db.delete(s)
+
+            # делаем окно offline
+            operator = db.query(Operator).filter(Operator.id == operator_id).first()
+            if operator and operator.window_id:
+                window = db.query(Window).filter(Window.id == operator.window_id).first()
+                if window:
+                    window.status = "offline"
+                    update_services_status_for_window(db, window.id)
+
+            db.commit()
+        except Exception as e:
+            print(f"Ошибка при очистке базы для оператора {operator_id}: {e}")
+        finally:
+            db.close()
+
+        # уведомляем всех терминалы
+        await manager.broadcast({"type": "services_updated"})
 # ------------------ Дополнительные функции ------------------
 
 def get_called_tickets():
@@ -1074,32 +1171,7 @@ def get_operator_state(operator_id: int):
     finally:
         db.close()
 
-def get_operator_by_session(db: Session, session_id: str):
-    session = db.query(UserSession).filter(UserSession.session_id == session_id).first()
-
-    if not session:
-        raise HTTPException(status_code=401, detail="Invalid session")
-
-    operator = db.query(Operator).filter(Operator.id == session.operator_id).first()
-
-    if not operator:
-        raise HTTPException(status_code=401, detail="Operator not found")
-
-    return operator
     
-@app.get("/auth/test-session")
-def test_session(session_id: str = Header(...)):
-    db = SessionLocal()
-
-    operator = get_operator_by_session(db, session_id)
-
-    db.close()
-
-    return {
-        "operator_id": operator.id,
-        "name": operator.name,
-        "window_id": operator.window_id
-    }
 
 # ------------------ Создание таблиц ------------------
 Base.metadata.create_all(bind=engine)

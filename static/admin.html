@@ -24,7 +24,23 @@ background:#ddd;
 cursor:pointer
 }
 
-.tabs button:hover{background:#1490a3}
+.tabs button:hover{
+	background:#1490a3;
+	color: white;
+}
+
+.tabs button.active {
+    background: #1490a3;
+    color: white;
+}
+
+.sticky-header {
+    position: -webkit-sticky; /* Для совместимости с Safari */
+    position: sticky;
+    top: 0;
+    z-index: 1000; /* Чтобы блок всегда был сверху */
+    background: #f4f4f4; /* Цвет фона, чтобы при прокрутке за ним ничего не просвечивало */
+}
 
 .content{padding:20px}
 
@@ -84,18 +100,19 @@ border:1px solid #ddd
 
 <body>
 
-<header>Управление Очередью</header>
-
-<div class="tabs">
-<button onclick="loadServices()">Услуги</button>
-<button onclick="loadWindows()">Окна</button>
-<button onclick="loadOperators()">Операторы</button>
-<button onclick="loadTickets()">Очередь</button>
+<div class="sticky-header">
+    <header>Управление Очередью</header>
+    <div class="tabs">
+        <button id="tab-services" onclick="loadServices()">Услуги</button>
+        <button id="tab-windows" onclick="loadWindows()">Окна</button>
+        <button id="tab-operators" onclick="loadOperators()">Операторы</button>
+        <button id="tab-stats" onclick="loadStats()">Статистика</button>
+    </div>
 </div>
 
 <div class="content">
-<div id="form"></div>
-<table id="table"></table>
+    <div id="form"></div>
+    <table id="table"></table>
 </div>
 
 <script>
@@ -125,6 +142,7 @@ document.getElementById("form").innerHTML=html
 ////////////////////////////////////////
 
 async function loadServices(){
+  setActiveTab('tab-services');
   services = await fetchJSON(`${API}/services/`);
 
   let html = `<tr>
@@ -143,7 +161,7 @@ async function loadServices(){
       <td>
         <button onclick="editService(${s.id},'${s.name}')">Название</button>
         <button onclick="editServiceStatus(${s.id}, '${s.status}')">Статус</button>
-        <button onclick="deleteService(${s.id})">Удалить</button>
+        <button style="background: #ffcccc;" onclick="deleteService(${s.id})">Удалить</button>
       </td>
     </tr>`;
   }
@@ -286,6 +304,7 @@ loadServices()
 ////////////////////////////////////////
 
 async function loadWindows() {
+	setActiveTab('tab-windows');
     windows = await fetchJSON(`${API}/windows/`);
 
     let html = `<tr>
@@ -304,7 +323,7 @@ async function loadWindows() {
             <td>
                 <button onclick="editWindow(${w.id},'${w.name}')">Название</button>
                 <button onclick="editWindowStatus(${w.id}, '${w.status}')">Статус</button>
-                <button onclick="deleteWindow(${w.id})">Удалить</button>
+                <button style="background: #ffcccc;" onclick="deleteWindow(${w.id})">Удалить</button>
             </td>
         </tr>`;
     }
@@ -447,7 +466,7 @@ return w?w.name:"-"
 ////////////////////////////////////////
 
 async function loadOperators(){
-
+setActiveTab('tab-operators');
 windows=await fetchJSON(`${API}/windows/`)
 operators=await fetchJSON(`${API}/operators/`)
 services=await fetchJSON(`${API}/services/`)
@@ -463,39 +482,20 @@ let html=`<tr>
 
 for(let op of operators){
 
-html+=`
+
+html += `
 <tr id="row-${op.id}">
-<td>${op.id}</td>
-
-<td id="name-${op.id}">
-${op.name}
-</td>
-
-<td id="window-${op.id}">
-${getWindowName(op.window_id)}
-</td>
-
-<td>
-
-<button onclick="editOperatorName(${op.id},'${op.name}')">
-Имя
-</button>
-
-<button onclick="editOperatorWindow(${op.id},${op.window_id})">
-Окно
-</button>
-
-<button onclick="editServices(${op.id},${op.window_id})"
-${!op.window_id?"disabled":""}>
-Услуги
-</button>
-
-<button onclick="editLoginPassword(${op.id})">
-Данные входа
-</button>
-
-</td>
-</tr>`
+  <td>${op.id}</td>
+  <td id="name-${op.id}">${op.name}</td>
+  <td id="window-${op.id}">${getWindowName(op.window_id)}</td>
+  <td>
+    <button onclick="editOperatorName(${op.id},'${op.name}')">Имя</button>
+    <button onclick="editOperatorWindow(${op.id},${op.window_id})">Окно</button>
+    <button onclick="editServices(${op.id},${op.window_id})" ${!op.window_id?"disabled":""}>Услуги</button>
+    <button onclick="editLoginPassword(${op.id})">Данные</button>
+    <button style="background: #ffcccc;" onclick="deleteOperator(${op.id})">Удалить</button>
+  </td>
+</tr>`;
 }
 
 setTable(html)
@@ -774,6 +774,59 @@ async function saveLoginPassword(operator_id) {
     loadOperators();
 }
 
+function loadStats() {
+setActiveTab('tab-stats');
+    // 1. Очищаем форму
+    setForm(""); 
+    
+    // 2. Вставляем iframe с дашбордом Grafana
+    // Замените URL на ваш адрес дашборда
+    const grafanaUrl = "http://localhost:3000/goto/afg7a2bkgdce8a?orgId=1&panelId=1";
+    
+    const html = `
+        <div style="width: 100%; height: 800px; background: white; padding: 10px;">
+            <iframe 
+                src="${grafanaUrl}" 
+                width="100%" 
+                height="100%" 
+                frameborder="0">
+            </iframe>
+        </div>
+    `;
+    
+    setTable(html);
+}
+
+function setActiveTab(tabId) {
+    // Убираем класс active у всех кнопок
+    document.querySelectorAll('.tabs button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    // Добавляем класс нужной кнопке
+    document.getElementById(tabId).classList.add('active');
+}
+
+async function deleteOperator(id) {
+  if (!confirm("Вы уверены, что хотите удалить этого оператора?")) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API}/operators/${id}`, {
+      method: "DELETE"
+    });
+
+    if (res.ok) {
+      alert("Оператор удален");
+      loadOperators(); // Перезагружаем список
+    } else {
+      const err = await res.json();
+      alert("Ошибка при удалении: " + err.detail);
+    }
+  } catch (error) {
+    alert("Ошибка соединения с сервером");
+  }
+}
 </script>
 
 </body>

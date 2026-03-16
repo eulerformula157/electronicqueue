@@ -30,18 +30,39 @@ h1 {
 
 /* ===== Левая панель (очередь) ===== */
 #queue-panel {
-    width: 250px;
+    width: 260px;
     background: white;
-    padding: 20px;
     border-radius: 10px;
     box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+    overflow: hidden;
 }
 
 #queue-panel h3 {
-    margin-top: 0;
+    margin: 0;
+    padding: 15px;
+    background: white;
     border-bottom: 1px solid #eee;
-    padding-bottom: 8px;
 }
+
+#queue-list {
+    max-height: calc(100vh - 320px);
+    overflow-y: auto;
+    padding: 15px;
+}
+
+
+#queue-panel::-webkit-scrollbar-thumb {
+    position: sticky;
+    background: #cfcfcf;
+    border-radius: 4px;
+}
+
+#queue-panel::-webkit-scrollbar-thumb:hover {
+    position: sticky;
+    background: #b5b5b5;
+}
+
+
 
 .queue-item {
     padding: 10px;
@@ -151,8 +172,25 @@ button.danger:hover {
 /* ===== Строка 1 (статус) ===== */
 .top-row {
     display: flex;
-    gap: 15px;
+    justify-content: space-between;
+    align-items: center;
     padding: 20px 40px 10px 40px;
+}
+
+.status-buttons {
+    display: flex;
+    gap: 15px;
+}
+
+.logout-btn {
+    background: #95a5a6;
+    color: white;
+    padding: 8px 18px;
+    border-radius: 6px;
+}
+
+.logout-btn:hover {
+    background: #7f8c8d;
 }
 
 /* ===== Строка 2 (действия) ===== */
@@ -201,12 +239,19 @@ button.danger:hover {
 <body>
 <!-- ===== Первая строка кнопок ===== -->
 <div class="top-row">
-    <button id="btn-start" class="status-btn start" onclick="changeWindowStatus('online')">
-        НАЧАТЬ
-    </button>
-    <button id="btn-stop" class="status-btn stop" onclick="changeWindowStatus('offline')">
-        ОТОЙТИ
-    </button>
+
+    <div class="status-buttons">
+        <button id="btn-start" class="status-btn start" onclick="changeWindowStatus('online')">
+            НАЧАТЬ
+        </button>
+
+        <button id="btn-stop" class="status-btn stop" onclick="changeWindowStatus('offline')">
+            ОТОЙТИ
+        </button>
+    </div>
+
+    <button class="logout-btn" onclick="logout()">ВЫЙТИ</button>
+
 </div>
 
 <!-- ===== Вторая строка кнопок ===== -->
@@ -219,10 +264,10 @@ button.danger:hover {
 <!-- ===== Основная рабочая зона ===== -->
 <div class="workspace">
 
-    <div id="queue-panel">
-        <h3>Очередь</h3>
-        Загрузка...
-    </div>
+	<div id="queue-panel">
+		<h3>Очередь</h3>
+		<div id="queue-list">Загрузка...</div>
+	</div>
 
     <div class="center-panel">
         <div id="current">Окно свободно</div>
@@ -243,8 +288,9 @@ button.danger:hover {
 <script>
 const API_URL = "http://localhost:8000"; 
 
-let operatorId = null;
-let sessionId = null;
+let sessionId = sessionStorage.getItem("session_id")
+
+const panel = document.getElementById("queue-list");
 
 async function init() {
     const sessionToken = sessionStorage.getItem("session_id");
@@ -268,7 +314,7 @@ async function init() {
         operatorId = data.operator_id; 
 
         // После этого можно безопасно запускать WebSocket
-        initWebSocket();
+        //initWebSocket();
 
         // Параллельно можно загружать очередь, услуги и инфо
         loadOperatorInfo();
@@ -279,10 +325,12 @@ async function init() {
         console.error(e);
         window.location.href = "/static/login.html";
     }
+	
+	loadCurrentTicket();
 }
 
 function initWebSocket() {
-    const socket = new WebSocket(`ws://localhost:8000/ws/terminal/${operatorId}`);
+    const socket = new WebSocket(`ws://localhost:8000/ws/terminal`);
 
 	socket.onopen = () => {
 		console.log("WebSocket подключен");
@@ -309,6 +357,10 @@ function initWebSocket() {
 
 // Запускаем инициализацию
 init();
+initWebSocket();
+loadOperatorInfo();
+loadQueue();
+loadAllServices();
 // ==================== WebSocket ====================
 
 
@@ -372,21 +424,21 @@ async function loadOperatorInfo() {
 async function loadQueue() {
     try {
         const res = await fetch(`${API_URL}/tickets/my-queue`, {
-			headers: { "session-id": sessionId }
-		});
+            headers: { "session-id": sessionId }
+        });
+
         const tickets = await res.json();
 
-        const panel = document.getElementById("queue-panel");
+        const panel = document.getElementById("queue-list");
 
         if (!tickets.length) {
-            panel.innerHTML = "<h3>Очередь</h3>Нет ожидающих";
+            panel.innerHTML = "Нет ожидающих";
             return;
         }
 
-        panel.innerHTML = "<h3>Очередь</h3>" +
-            tickets.map(t =>
-                `<div class="queue-item">№ ${t.number}</div>`
-            ).join("");
+        panel.innerHTML = tickets.map(t =>
+            `<div class="queue-item">№ ${t.number}</div>`
+        ).join("");
 
     } catch (e) {
         console.error(e);
@@ -525,7 +577,17 @@ async function confirmRedirect() {
 
 async function changeWindowStatus(newStatus) {
     try {
-        const operatorRes = await fetch(`${API_URL}/operators/`);
+        const sessionId = sessionStorage.getItem("session_id");
+        if (!sessionId) {
+            alert("Сессия не найдена. Перезайдите.");
+            window.location.href = "/static/login.html";
+            return;
+        }
+
+        // Получаем информацию об операторе
+        const operatorRes = await fetch(`${API_URL}/operators/`, {
+            headers: { "session-id": sessionId }
+        });
         const operators = await operatorRes.json();
         const operator = operators.find(o => o.id === operatorId);
 
@@ -534,27 +596,33 @@ async function changeWindowStatus(newStatus) {
             return;
         }
 
-        const res = await fetch(`${API_URL}/windows/update-status`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                window_id: operator.window_id,
-                status: newStatus
-            })
-        });
+        // POST на update-status с session-id и правильными типами
+		const res = await fetch(`${API_URL}/windows/update-status`, {
+			method: "POST",
+			headers: { 
+				"Content-Type": "application/json",
+				"session-id": sessionStorage.getItem("session_id")
+			},
+			body: JSON.stringify({
+				window_id: operator.window_id,
+				status: newStatus
+			})
+		});
+
+        if (!res.ok) {
+            const err = await res.json();
+            alert(err.detail || "Ошибка при смене статуса");
+            return;
+        }
 
         const result = await res.json();
 
-        if (result.detail) {
-            alert(result.detail);
-        } else {
-            updateStatusButtons(newStatus);
-            loadOperatorInfo();
-        }
+        updateStatusButtons(result.status); // обновляем кнопки по новому статусу
+        //loadOperatorInfo();                // обновляем информацию об операторе
 
     } catch (e) {
         console.error(e);
-        alert("Ошибка смены статуса");
+        alert("Ошибка при смене статуса");
     }
 }
 
@@ -575,25 +643,114 @@ function updateStatusButtons(status) {
 async function loadCurrentTicket() {
     try {
         const res = await fetch(`${API_URL}/tickets/current`, {
-			headers: { "session-id": sessionId }
-		});
+            headers: { "session-id": sessionId }
+        });
+
         const data = await res.json();
+
         if (data.ticket) {
+
             currentTicketId = data.ticket.id;
+
+            document.getElementById("current").textContent =
+                "Текущий клиент: " + data.ticket.number;
+
         } else {
+
             currentTicketId = null;
+            document.getElementById("current").textContent = "Окно свободно";
+
         }
+
     } catch (e) {
         console.error(e);
-        currentTicketId = null;
     }
 }
 
-/* =========================
-   Инициализация
-========================= */
 
+async function logout() {
+    if (!confirm("Вы уверены, что хотите завершить работу?")) return;
 
+    try {
+        await fetch(`${API_URL}/logout`, {
+            method: "POST",
+            headers: { "session-id": sessionStorage.getItem("session_id") }
+        });
+        
+        // Очищаем локальное хранилище и перенаправляем
+        sessionStorage.removeItem("session_id");
+        window.location.href = "/static/login.html";
+    } catch (e) {
+        console.error("Ошибка при выходе:", e);
+        // Даже если ошибка сети, принудительно выкидываем
+        window.location.href = "/static/login.html";
+    }
+}
+
+let isNavigating = false;
+
+window.addEventListener("beforeunload", () => {
+    // Если пользователь переходит по ссылке или обновляет страницу, 
+    // мы не хотим убивать сессию, если он вернется через секунду
+    if (!isNavigating) {
+        navigator.sendBeacon(`${API_URL}/logout`, JSON.stringify({
+            session_id: sessionStorage.getItem("session_id")
+        }));
+    }
+});
+
+// Добавьте это ко всем ссылкам/кнопкам, которые ведут на другие страницы
+document.querySelectorAll('a').forEach(link => {
+    link.addEventListener('click', () => isNavigating = true);
+});
+
+let isClosingTab = false;
+
+// если страница была обновлена — убираем флаг
+if (sessionStorage.getItem("refresh")) {
+    sessionStorage.removeItem("refresh");
+}
+
+// отслеживаем F5 / Ctrl+R
+window.addEventListener("keydown", function (event) {
+
+    if (event.key === "F5" || (event.ctrlKey && event.key === "r")) {
+        isClosingTab = true;
+        sessionStorage.setItem("refresh", "true");
+    }
+
+});
+
+// переход по ссылкам
+document.addEventListener("click", function (event) {
+
+    const link = event.target.closest("a");
+
+    if (link) {
+        isClosingTab = true;
+    }
+
+});
+
+// основной обработчик закрытия страницы
+window.addEventListener("beforeunload", function () {
+
+    // если это обновление страницы — ничего не делаем
+    if (isClosingTab || sessionStorage.getItem("refresh")) {
+        return;
+    }
+
+    // если вкладку закрывают
+    if (sessionId) {
+
+        navigator.sendBeacon(
+            `${API_URL}/logout`,
+            JSON.stringify({ session_id: sessionId })
+        );
+
+    }
+
+});
 
 </script>
 

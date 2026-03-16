@@ -191,7 +191,8 @@ async function createTicket(serviceId) {
             showNotice("В данный момент нет доступных специалистов", 3);
             return;
         }
-
+		
+		socket.send(JSON.stringify({ type: "queue_updated" }));
         showNotice(`Возьмите ваш талон: ${ticket.number ?? "—"}`, NOTICE_DURATION);
 
     } catch (e) {
