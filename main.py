@@ -1,5 +1,5 @@
 # main.py
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException, Body, Header
 from pydantic import BaseModel
 from sqlalchemy import Column, Integer, String, ForeignKey, TIMESTAMP, text
 from sqlalchemy.orm import declarative_base
@@ -17,6 +17,8 @@ import json
 from datetime import datetime
 from sqlalchemy import text
 import asyncio
+import secrets
+
 
 DATABASE_URL = "postgresql://postgres:password@localhost:5432/postgres"
 
@@ -119,6 +121,14 @@ class OperatorLoginUpdate(BaseModel):
 
 class ServiceStatusUpdate(BaseModel):
     status: str  # "active" или "inactive"
+
+# В модели SQLAlchemy
+class UserSession(Base):
+    __tablename__ = "sessions"
+    session_id = Column(String, primary_key=True) 
+    operator_id = Column(Integer, ForeignKey("operators.id"))
+    created_at = Column(TIMESTAMP, server_default=text("NOW()"), nullable=False)
+
 # ------------------ Pydantic схемы ------------------
 
 class ServiceCreate(BaseModel):
@@ -296,11 +306,10 @@ async def create_ticket(ticket: TicketCreate):
     return db_ticket
      
 @app.post("/tickets/finish", tags=["Tickets"])
-async def finish_ticket(operator_id: int = Body(..., embed=True)):
+async def finish_ticket(session_id: str = Header(...)):
     db = SessionLocal()
-    
-    # Ищем текущий активный тикет для оператора
-    operator = db.query(Operator).filter(Operator.id == operator_id).first()
+
+    operator = get_operator_by_session(db, session_id)
     if not operator or not operator.window_id:
         db.close()
         raise HTTPException(status_code=404, detail="Operator or window not found")
@@ -327,12 +336,12 @@ async def finish_ticket(operator_id: int = Body(..., embed=True)):
     db.close()
     return ticket
 
-@app.post("/tickets/next-by-operator", tags=["Tickets"])
-async def call_next_ticket_by_operator(operator_id: int = Body(..., embed=True)):
+@app.post("/tickets/next", tags=["Tickets"])
+async def call_next_ticket(session_id: str = Header(...)):
     db = SessionLocal()
 
-    # 1. Получаем оператора
-    operator = db.query(Operator).filter(Operator.id == operator_id).first()
+    # получаем оператора из session
+    operator = get_operator_by_session(db, session_id)
     if not operator:
         db.close()
         raise HTTPException(status_code=404, detail="Operator not found")
@@ -387,16 +396,12 @@ async def call_next_ticket_by_operator(operator_id: int = Body(..., embed=True))
 
     return ticket
 
-@app.get("/tickets/queue-by-operator/{operator_id}", tags=["Tickets"])
-def get_queue_by_operator(operator_id: int):
+@app.get("/tickets/my-queue", tags=["Tickets"])
+def get_my_queue(session_id: str = Header(...)):
     db = SessionLocal()
 
-    # 1. Получаем оператора
-    operator = db.query(Operator).filter(Operator.id == operator_id).first()
-    if not operator:
-        db.close()
-        raise HTTPException(status_code=404, detail="Operator not found")
-
+    operator = get_operator_by_session(db, session_id)
+    
     if not operator.window_id:
         db.close()
         return []
@@ -651,54 +656,68 @@ def delete_window_service(window_id: int, service_id: int):
 
     return {"status":"ok"}
 
+class LoginRequest(BaseModel):
+    login: str
+    password: str
+
 @app.post("/login", tags=["Auth"])
-async def login(login: str = Body(...), password: str = Body(...)):
+async def login(data: LoginRequest): # Принимаем модель
     db = SessionLocal()
     try:
+        # Обращаемся через data.login и data.password
         operator = db.query(Operator).filter(
-            Operator.login == login,
-            Operator.password == password
+            Operator.login == data.login, 
+            Operator.password == data.password
         ).first()
-
+        
         if not operator:
-            raise HTTPException(
-                status_code=401,
-                detail="Неверный логин или пароль"
-            )
-
-        window_id = None
-
-        # Если у оператора есть окно — делаем его online
+            raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+        
+        token = secrets.token_hex(32)
+        new_session = UserSession(
+            session_id=token, 
+            operator_id=operator.id, 
+            created_at=datetime.now()
+        )
+        db.add(new_session)
+        # Делаем окно онлайн (ваш существующий код)
         if operator.window_id:
-            window = db.query(Window).filter(
-                Window.id == operator.window_id
-            ).first()
-
+            window = db.query(Window).filter(Window.id == operator.window_id).first()
             if window:
                 window.status = "online"
-                window_id = window.id
-
-
+                update_services_status_for_window(db, window.id)
 
         db.commit()
 
-        # пересчитываем только если есть окно
-        if window_id:
-            update_services_status_for_window(db, window_id)
-            
+        # Используйте operator.window_id вместо просто window_id
+        if operator.window_id:
+            # статус сервисов мы уже обновили выше внутри try, 
+            # тут можно просто отправить уведомление в WebSocket
             await manager.broadcast({
-            "type": "services_updated",
-            "window_id": window_id
-        })
+                "type": "services_updated",
+                "window_id": operator.window_id
+            })
 
         return {
-            "operator_id": operator.id,
+            "session_id": token,
             "name": operator.name,
             "window_id": operator.window_id
         }
 
     finally:
         db.close()
+
+@app.get("/auth/me", tags=["Auth"])
+def get_me(session_id: str = Header(...)):
+    db = SessionLocal()
+    session = db.query(UserSession).filter(UserSession.session_id == session_id).first()
+    if not session:
+        db.close()
+        raise HTTPException(status_code=401, detail="Invalid session")
+    
+    operator = db.query(Operator).filter(Operator.id == session.operator_id).first()
+    db.close()
+    return {"operator_id": operator.id, "name": operator.name, "window_id": operator.window_id}
 
 @app.post("/windows/update-status", tags=["Windows"])
 async def update_window_status(data: WindowStatusUpdateOp):
@@ -725,21 +744,28 @@ async def update_window_status(data: WindowStatusUpdateOp):
     finally:
         db.close()
 
-@app.get("/tickets/current/{operator_id}", tags=["Tickets"])
-def get_current_ticket(operator_id: int):
+@app.get("/tickets/current", tags=["Tickets"])
+def get_current_ticket(session_id: str = Header(...)):
     db = SessionLocal()
     try:
-        # Тикет, который сейчас "called" у оператора
+        operator = get_operator_by_session(db, session_id)
+
+        if not operator.window_id:
+            return {"ticket": None}
+
         ticket = (
             db.query(Ticket)
-            .filter(Ticket.status == "called", Ticket.window_id == operator_id)
-            .order_by(Ticket.created_at.asc())  # или по нужному критерию
+            .filter(
+                Ticket.status == "called",
+                Ticket.window_id == operator.window_id
+            )
+            .order_by(Ticket.created_at.asc())
             .first()
         )
+
         if not ticket:
-            db.close()
-            #return {"detail": "Нет текущего клиента"}
             return {"ticket": None}
+
         return {"ticket": ticket}
     finally:
         db.close()
@@ -1047,6 +1073,33 @@ def get_operator_state(operator_id: int):
         }
     finally:
         db.close()
+
+def get_operator_by_session(db: Session, session_id: str):
+    session = db.query(UserSession).filter(UserSession.session_id == session_id).first()
+
+    if not session:
+        raise HTTPException(status_code=401, detail="Invalid session")
+
+    operator = db.query(Operator).filter(Operator.id == session.operator_id).first()
+
+    if not operator:
+        raise HTTPException(status_code=401, detail="Operator not found")
+
+    return operator
+    
+@app.get("/auth/test-session")
+def test_session(session_id: str = Header(...)):
+    db = SessionLocal()
+
+    operator = get_operator_by_session(db, session_id)
+
+    db.close()
+
+    return {
+        "operator_id": operator.id,
+        "name": operator.name,
+        "window_id": operator.window_id
+    }
 
 # ------------------ Создание таблиц ------------------
 Base.metadata.create_all(bind=engine)

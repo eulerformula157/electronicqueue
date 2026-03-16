@@ -95,10 +95,15 @@ async function submitLogin() {
         if (!res.ok) throw new Error("Неверный логин или пароль");
         return res.json();
     })
-    .then(data => {
-        sessionStorage.setItem("operator_id", data.operator_id);
-        window.location.href = "/static/operator.html";
-    })
+	.then(data => {
+		console.log("LOGIN RESPONSE:", data);
+
+		sessionStorage.setItem("session_id", data.session_id);
+
+		console.log("SESSION SAVED:", sessionStorage.getItem("session_id"));
+
+		window.location.href = "/static/operator.html";
+	})
     .catch(err => {
         document.getElementById("login-error").textContent = err.message;
     });

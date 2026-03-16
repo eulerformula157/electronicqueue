@@ -242,37 +242,75 @@ button.danger:hover {
 
 <script>
 const API_URL = "http://localhost:8000"; 
-const operatorId = parseInt(sessionStorage.getItem("operator_id"));
 
-if (!operatorId) {
-    alert("Не выполнен вход");
-    window.location.href = "/static/login.html";
+let operatorId = null;
+let sessionId = null;
+
+async function init() {
+    const sessionToken = sessionStorage.getItem("session_id");
+    if (!sessionToken) {
+        window.location.href = "/static/login.html";
+        return;
+    }
+
+    try {
+        // Получаем ID оператора
+        const res = await fetch(`${API_URL}/auth/me`, {
+            headers: { "session-id": sessionToken } // исправлено
+        });
+
+        if (!res.ok) {
+            window.location.href = "/static/login.html";
+            return;
+        }
+
+        const data = await res.json();
+        operatorId = data.operator_id; 
+
+        // После этого можно безопасно запускать WebSocket
+        initWebSocket();
+
+        // Параллельно можно загружать очередь, услуги и инфо
+        loadOperatorInfo();
+        loadQueue();
+        loadAllServices();
+
+    } catch (e) {
+        console.error(e);
+        window.location.href = "/static/login.html";
+    }
 }
 
+function initWebSocket() {
+    const socket = new WebSocket(`ws://localhost:8000/ws/terminal/${operatorId}`);
+
+	socket.onopen = () => {
+		console.log("WebSocket подключен");
+	};
+
+	socket.onmessage = function(event) {
+		const data = JSON.parse(event.data);
+
+		if (data.type === "services_updated") {
+			// обновляем информацию об операторе сразу при изменении окна
+			loadOperatorInfo();
+		}    
+		
+		if (data.type === "queue_updated") {
+			// обновляем информацию об очереди сразу при изменении
+			loadQueue();
+		}
+	};
+
+	socket.onclose = () => {
+		console.log("WebSocket отключен");
+	};
+}
+
+// Запускаем инициализацию
+init();
 // ==================== WebSocket ====================
-const socket = new WebSocket(`ws://localhost:8000/ws/terminal/${operatorId}`);
 
-socket.onopen = () => {
-    console.log("WebSocket подключен");
-};
-
-socket.onmessage = function(event) {
-    const data = JSON.parse(event.data);
-
-    if (data.type === "services_updated") {
-        // обновляем информацию об операторе сразу при изменении окна
-        loadOperatorInfo();
-    }    
-	
-	if (data.type === "queue_updated") {
-        // обновляем информацию об очереди сразу при изменении
-        loadQueue();
-    }
-};
-
-socket.onclose = () => {
-    console.log("WebSocket отключен");
-};
 
 let currentTicketId = null;
 let allServices = [];
@@ -333,7 +371,9 @@ async function loadOperatorInfo() {
 ========================= */
 async function loadQueue() {
     try {
-        const res = await fetch(`${API_URL}/tickets/queue-by-operator/${operatorId}`);
+        const res = await fetch(`${API_URL}/tickets/my-queue`, {
+			headers: { "session-id": sessionId }
+		});
         const tickets = await res.json();
 
         const panel = document.getElementById("queue-panel");
@@ -357,11 +397,13 @@ async function loadQueue() {
    Вызов следующего клиента
 ========================= */
 async function callNext() {
-    const res = await fetch(`${API_URL}/tickets/next-by-operator`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operator_id: operatorId })
-    });
+	const res = await fetch(`${API_URL}/tickets/next`, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			"session-id": sessionId
+		}
+	});
 
     const ticket = await res.json();
 
@@ -385,8 +427,10 @@ async function finishCurrent() {
     try {
         const res = await fetch(`${API_URL}/tickets/finish`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ operator_id: operatorId }) // теперь отправляем операторa
+            headers: {
+					"Content-Type": "application/json",
+					"session-id": sessionId
+				}
         });
 
         const result = await res.json();
@@ -530,7 +574,9 @@ function updateStatusButtons(status) {
 
 async function loadCurrentTicket() {
     try {
-        const res = await fetch(`${API_URL}/tickets/current/${operatorId}`);
+        const res = await fetch(`${API_URL}/tickets/current`, {
+			headers: { "session-id": sessionId }
+		});
         const data = await res.json();
         if (data.ticket) {
             currentTicketId = data.ticket.id;
@@ -546,9 +592,7 @@ async function loadCurrentTicket() {
 /* =========================
    Инициализация
 ========================= */
-loadOperatorInfo();
-loadQueue();
-loadAllServices();
+
 
 
 </script>
