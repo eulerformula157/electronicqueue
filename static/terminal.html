@@ -110,6 +110,21 @@ button.service-btn.unavailable:hover {
     font-size: 22px;
     font-weight: bold;
 }
+
+@media print {
+    /* Скрываем весь основной интерфейс */
+    body > *:not(#print-receipt) {
+        display: none !important;
+    }
+
+    /* Показываем только чек */
+    #print-receipt {
+        display: block !important;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+    }
+}
 </style>
 </head>
 
@@ -162,7 +177,7 @@ async function loadServices() {
                 };
             } else {
                 btn.textContent = service.name;
-                btn.onclick = () => createTicket(service.id);
+                btn.onclick = () => createTicket(service.id, service.name);
             }
 
             container.appendChild(btn);
@@ -174,7 +189,7 @@ async function loadServices() {
 }
 
 // --- Создание талона ---
-async function createTicket(serviceId) {
+async function createTicket(serviceId, serviceName) {
     const buttons = document.querySelectorAll(".service-btn");
     buttons.forEach(b => b.disabled = true);
 
@@ -187,24 +202,33 @@ async function createTicket(serviceId) {
 
         const ticket = await res.json();
 
-        if (ticket.error) {
+        // СНАЧАЛА проверяем ошибку
+        if (!ticket || ticket.error) {
             showNotice("В данный момент нет доступных специалистов", 3);
-            return;
+            return; // Выходим, печать не вызываем
         }
+        
+		document.getElementById("receipt-number").textContent = ticket.number;
+		document.getElementById("receipt-service").textContent = serviceName; // Печатаем имя
+		document.getElementById("receipt-date").textContent = new Date().toLocaleString();
+
+		// Вызываем печать
+		window.print();
 		
-		socket.send(JSON.stringify({ type: "queue_updated" }));
+        socket.send(JSON.stringify({ type: "queue_updated" }));
         showNotice(`Возьмите ваш талон: ${ticket.number ?? "—"}`, NOTICE_DURATION);
 
     } catch (e) {
-        console.error(e);
+        console.error("Критическая ошибка:", e);
         showNotice("Ошибка системы. Попробуйте позже.", 3);
+    } finally {
+        // Разблокируем кнопки в любом случае
+        buttons.forEach(b => {
+            if (!b.classList.contains("unavailable")) {
+                b.disabled = false;
+            }
+        });
     }
-
-    buttons.forEach(b => {
-        if (!b.classList.contains("unavailable")) {
-            b.disabled = false;
-        }
-    });
 }
 
 // --- Показ уведомления ---
@@ -231,6 +255,13 @@ function showNotice(message, duration) {
 // --- Инициализация ---
 loadServices();
 </script>
+
+<div id="print-receipt" style="display: none; text-align: center; font-family: sans-serif; padding: 20px;">
+    <h1 style="font-size: 32px; margin: 10px 0;">ВАШ ТАЛОН</h1>
+    <div id="receipt-number" style="font-size: 80px; font-weight: bold; margin: 20px 0;"></div>
+    <h2 id="receipt-service" style="font-size: 28px; margin: 10px 0;"></h2>
+    <p id="receipt-date" style="font-size: 18px; margin-top: 30px;"></p>
+</div>
 
 </body>
 </html>

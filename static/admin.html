@@ -359,6 +359,7 @@ function editWindowStatus(id, currentStatus) {
     <td>
       <select id="windowStatusSelect-${id}">
         <option value="online" ${currentStatus==="online"?"selected":""}>online</option>
+        <option value="break" ${currentStatus==="break"?"selected":""}>break</option>
         <option value="offline" ${currentStatus==="offline"?"selected":""}>offline</option>
       </select>
 	  <button onclick="saveWindowStatus(${id})">Сохранить</button>

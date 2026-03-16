@@ -143,30 +143,31 @@ button.danger:hover {
     transition: 0.2s ease;
 }
 
-/* старт */
+//* Старт (например, поменяем на синий) */
 .start {
-    background: #2ecc71;
+    background: #3498db; /* Новый цвет фона */
     color: white;
 }
 
 .start:hover {
-    background: #27ae60;
+    background: #29b97b; /* Новый цвет при наведении */
 }
 
-/* стоп */
+/* Стоп (например, поменяем на серый/оранжевый) */
 .stop {
-    background: #e74c3c;
+    background: #f39c12; /* Новый цвет фона */
     color: white;
 }
 
 .stop:hover {
-    background: #c0392b;
+    background: #e67e22; /* Новый цвет при наведении */
 }
 
 /* активная кнопка */
 .status-active {
-    box-shadow: 0 0 0 3px rgba(0,0,0,0.2) inset;
-    transform: scale(0.98);
+    box-shadow: 0 0 0 3px rgba(0,0,0,0.3) inset; /* Толщина и прозрачность рамки */
+    filter: brightness(85%); /* Чуть затемняем активную кнопку */
+    transform: scale(0.95);    /* Немного уменьшаем её при нажатии */
 }
 
 /* ===== Строка 1 (статус) ===== */
@@ -182,15 +183,14 @@ button.danger:hover {
     gap: 15px;
 }
 
-.logout-btn {
-    background: #95a5a6;
+/* Добавьте это к вашим стилям .start и .stop */
+.logout {
+    background: #963930; /* Ваш исходный серый цвет */
     color: white;
-    padding: 8px 18px;
-    border-radius: 6px;
 }
 
-.logout-btn:hover {
-    background: #7f8c8d;
+.logout:hover {
+    background: #661911; /* Чуть темнее при наведении для интерактивности */
 }
 
 /* ===== Строка 2 (действия) ===== */
@@ -245,18 +245,18 @@ button.danger:hover {
             НАЧАТЬ
         </button>
 
-        <button id="btn-stop" class="status-btn stop" onclick="changeWindowStatus('offline')">
+        <button id="btn-stop" class="status-btn stop" onclick="changeWindowStatus('break')">
             ОТОЙТИ
         </button>
     </div>
 
-    <button class="logout-btn" onclick="logout()">ВЫЙТИ</button>
+    <button class="status-btn logout" onclick="logout()">ВЫЙТИ</button>
 
 </div>
 
 <!-- ===== Вторая строка кнопок ===== -->
 <div class="action-row">
-    <button class="primary" onclick="callNext()">Начать обслуживание</button>
+    <button class="primary" onclick="callNext()">Следующий клиент</button>
     <button class="danger" onclick="finishCurrent()">Завершить</button>
     <button onclick="showRedirect()">Перенаправить</button>
 </div>
@@ -318,8 +318,8 @@ async function init() {
 
         // Параллельно можно загружать очередь, услуги и инфо
         loadOperatorInfo();
-        loadQueue();
-        loadAllServices();
+        //loadQueue();
+        //loadAllServices();
 
     } catch (e) {
         console.error(e);
@@ -358,7 +358,7 @@ function initWebSocket() {
 // Запускаем инициализацию
 init();
 initWebSocket();
-loadOperatorInfo();
+//loadOperatorInfo();
 loadQueue();
 loadAllServices();
 // ==================== WebSocket ====================
@@ -449,6 +449,14 @@ async function loadQueue() {
    Вызов следующего клиента
 ========================= */
 async function callNext() {
+	const stopBtn = document.getElementById("btn-stop");
+    const isBreak = stopBtn.classList.contains("status-active");
+
+    // 2. Если статус 'break', меняем его на 'online' перед вызовом
+    if (isBreak) {
+        await changeWindowStatus('online');
+    }
+	
 	const res = await fetch(`${API_URL}/tickets/next`, {
 		method: "POST",
 		headers: {
@@ -584,7 +592,6 @@ async function changeWindowStatus(newStatus) {
             return;
         }
 
-        // Получаем информацию об операторе
         const operatorRes = await fetch(`${API_URL}/operators/`, {
             headers: { "session-id": sessionId }
         });
@@ -596,18 +603,29 @@ async function changeWindowStatus(newStatus) {
             return;
         }
 
-        // POST на update-status с session-id и правильными типами
-		const res = await fetch(`${API_URL}/windows/update-status`, {
-			method: "POST",
-			headers: { 
-				"Content-Type": "application/json",
-				"session-id": sessionStorage.getItem("session_id")
-			},
-			body: JSON.stringify({
-				window_id: operator.window_id,
-				status: newStatus
-			})
-		});
+        // --- Добавленная проверка ---
+        // Получаем объект окна, чтобы узнать текущий статус
+        const windowsRes = await fetch(`${API_URL}/windows/`);
+        const windows = await windowsRes.json();
+        const windowObj = windows.find(w => w.id === operator.window_id);
+
+        if (windowObj && windowObj.status === newStatus) {
+            console.log("Статус уже установлен, пропускаем запрос.");
+            return; // Прерываем выполнение функции
+        }
+        // ---------------------------
+
+        const res = await fetch(`${API_URL}/windows/update-status`, {
+            method: "POST",
+            headers: { 
+                "Content-Type": "application/json",
+                "session-id": sessionId
+            },
+            body: JSON.stringify({
+                window_id: operator.window_id,
+                status: newStatus
+            })
+        });
 
         if (!res.ok) {
             const err = await res.json();
@@ -616,9 +634,7 @@ async function changeWindowStatus(newStatus) {
         }
 
         const result = await res.json();
-
-        updateStatusButtons(result.status); // обновляем кнопки по новому статусу
-        //loadOperatorInfo();                // обновляем информацию об операторе
+        updateStatusButtons(result.status); 
 
     } catch (e) {
         console.error(e);

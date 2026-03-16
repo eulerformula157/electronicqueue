@@ -978,6 +978,10 @@ def update_operator_login(operator_id: int = Path(..., gt=0), data: OperatorLogi
     db.close()
     return {"message": "Login and password updated", "operator_id": operator.id}
 
+@app.get("/operator/dashboard", tags=["Operators"])
+def get_dashboard_data(operator: Operator = Depends(verify_session)):
+    return get_operator_state(operator.id)
+
 # ------------------ WebSocket Эндпоинты ------------------
 
 @app.websocket("/ws/terminal")
