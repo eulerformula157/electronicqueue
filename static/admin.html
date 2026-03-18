@@ -54,7 +54,6 @@ header{
 table {
     border-collapse: collapse;
     width: 100%;
-    table-layout: fixed;
     background: white;
 }
 
@@ -125,7 +124,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
         
         // Если всё хорошо, продолжаем инициализацию страницы
-        loadOperators(); 
+        //loadOperators(); 
 
     } catch (err) {
         console.error("Auth check failed:", err);
@@ -182,6 +181,7 @@ document.getElementById("form").innerHTML=html
 
 
 async function loadServices() {
+	setActiveTab('tab-services'); // <-- Добавьте эту строку
     // 1. Берем ID сессии из хранилища браузера
     const sessionId = sessionStorage.getItem("session_id");
 

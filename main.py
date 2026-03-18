@@ -781,7 +781,7 @@ async def login(data: LoginRequest):
     finally:
         db.close()
 
-@app.post("/logout")
+@app.post("/logout", tags=["Auth"])
 async def logout(session_id: str = Header(...)):
     db: Session = SessionLocal()
     try:
@@ -915,7 +915,7 @@ def get_current_ticket(operator: Operator = Depends(verify_session)):
     finally:
         db.close()
 
-@app.delete("/services/{service_id}")
+@app.delete("/services/{service_id}", tags=["Services"])
 async def delete_service(service_id: int, admin: Admin = Depends(verify_admin_session)): # Добавили проверку
     db = SessionLocal()
     service = db.query(Service).filter(Service.id == service_id).first()
@@ -974,21 +974,7 @@ async def delete_operator(operator_id: int, admin: Admin = Depends(verify_admin_
     db.close()
     return {"status": "ok"}
     
-@app.delete("/tickets/{ticket_id}", tags=["Tickets"])
-def delete_ticket(ticket_id: int):
-    db = SessionLocal()
-
-    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
-    if not ticket:
-        db.close()
-        raise HTTPException(status_code=404, detail="Ticket not found")
-
-    db.delete(ticket)
-    db.commit()
-    db.close()
-
-    return {"message": "Ticket deleted"}
-    
+   
 @app.patch("/operators/{operator_id}", tags=["Operators"])
 def update_operator(operator_id: int, data: dict):
 
@@ -1146,6 +1132,38 @@ async def websocket_operator(websocket: WebSocket, operator_id: int):
 
         # уведомляем всех терминалы
         await manager.broadcast({"type": "services_updated"})
+        
+        
+@app.get("/operators/details", tags=["Operators"])
+async def get_my_details(operator: Operator = Depends(verify_session)):
+    db = SessionLocal()
+    try:
+        # 1. Получаем информацию об окне
+        window = None
+        if operator.window_id:
+            window = db.query(Window).filter(Window.id == operator.window_id).first()
+        
+        # 2. Получаем названия услуг, привязанных к этому окну
+        service_names = []
+        if operator.window_id:
+            service_names = (
+                db.query(Service.name)
+                .join(WindowService, Service.id == WindowService.service_id)
+                .filter(WindowService.window_id == operator.window_id)
+                .all()
+            )
+            # Извлекаем строки из кортежей SQLAlchemy
+            service_names = [s[0] for s in service_names]
+
+        return {
+            "operator_name": operator.name,
+            "window_id": operator.window_id,
+            "window_name": window.name if window else "Не назначено",
+            "window_status": window.status if window else "offline",
+            "services": service_names
+        }
+    finally:
+        db.close()
 # ------------------ Дополнительные функции ------------------
 
 def get_called_tickets():

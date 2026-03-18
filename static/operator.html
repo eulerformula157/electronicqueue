@@ -373,46 +373,30 @@ let allServices = [];
 ========================= */
 async function loadOperatorInfo() {
     try {
-        const operatorRes = await fetch(`${API_URL}/operators/`);
-        const operators = await operatorRes.json();
-        const operator = operators.find(o => o.id === operatorId);
+        const res = await fetch(`${API_URL}/operators/details`, {
+            headers: { "session-id": sessionId }
+        });
 
-        if (!operator) {
-            document.getElementById("operator-info").textContent = "Оператор не найден";
-            return;
+        if (!res.ok) {
+            throw new Error("Не удалось загрузить данные профиля");
         }
 
-        const windowsRes = await fetch(`${API_URL}/windows/`);
-        const windows = await windowsRes.json();
-        const windowObj = windows.find(w => w.id === operator.window_id);
+        const data = await res.json();
 
-        const windowServicesRes = await fetch(`${API_URL}/window-services/`);
-        const windowServices = await windowServicesRes.json();
-
-        const servicesRes = await fetch(`${API_URL}/services/`);
-        const services = await servicesRes.json();
-
-        const serviceIds = windowServices
-            .filter(ws => ws.window_id === operator.window_id)
-            .map(ws => ws.service_id);
-
-        const serviceNames = services
-            .filter(s => serviceIds.includes(s.id))
-            .map(s => s.name);
-
-        // ------------------------
-        // Выводим всю информацию, просто status из окна
-        // ------------------------
+        // Обновляем UI
         document.getElementById("operator-info").innerHTML = `
-            <b>Оператор:</b> ${operator.name} <br>
-            <b>Окно:</b> ${windowObj ? windowObj.name : "не назначено"} <br>
-            <b>Статус:</b> ${windowObj ? windowObj.status : "нет данных"}<br>
-            <b>Оказываемые услуги:</b><br> ${serviceNames.join("<br>")}
+            <b>Оператор:</b> ${data.operator_name} <br>
+            <b>Окно:</b> ${data.window_name} <br>
+            <b>Статус:</b> ${data.window_status}<br>
+            <b>Оказываемые услуги:</b><br> ${data.services.length > 0 ? data.services.join("<br>") : "Услуги не назначены"}
         `;
+
+        // Синхронизируем кнопки статуса (online/break) с реальным состоянием из БД
+        updateStatusButtons(data.window_status);
 
     } catch (e) {
         console.error(e);
-        document.getElementById("operator-info").textContent = "Ошибка загрузки данных";
+        document.getElementById("operator-info").textContent = "Ошибка загрузки данных профиля";
     }
 }
 
@@ -592,29 +576,33 @@ async function changeWindowStatus(newStatus) {
             return;
         }
 
-        const operatorRes = await fetch(`${API_URL}/operators/`, {
+        // 1. Получаем данные о текущем операторе и его окне одним запросом
+        const resDetails = await fetch(`${API_URL}/operator/details`, {
             headers: { "session-id": sessionId }
         });
-        const operators = await operatorRes.json();
-        const operator = operators.find(o => o.id === operatorId);
 
-        if (!operator || !operator.window_id) {
-            alert("Окно не назначено");
+        if (!resDetails.ok) {
+            alert("Не удалось получить данные оператора");
             return;
         }
 
-        // --- Добавленная проверка ---
-        // Получаем объект окна, чтобы узнать текущий статус
-        const windowsRes = await fetch(`${API_URL}/windows/`);
-        const windows = await windowsRes.json();
-        const windowObj = windows.find(w => w.id === operator.window_id);
+        const details = await resDetails.json();
 
-        if (windowObj && windowObj.status === newStatus) {
-            console.log("Статус уже установлен, пропускаем запрос.");
-            return; // Прерываем выполнение функции
+        // Проверяем, привязано ли вообще окно
+        // В новом эндпоинте мы можем добавить window_id в возвращаемый JSON 
+        // (см. примечание ниже к Python коду)
+        if (!details.window_id) {
+            alert("За вами не закреплено активное окно");
+            return;
         }
-        // ---------------------------
 
+        // 2. Проверка: если статус уже такой же, ничего не делаем
+        if (details.window_status === newStatus) {
+            console.log("Статус уже установлен, пропускаем запрос.");
+            return; 
+        }
+
+        // 3. Отправляем запрос на смену статуса
         const res = await fetch(`${API_URL}/windows/update-status`, {
             method: "POST",
             headers: { 
@@ -622,7 +610,7 @@ async function changeWindowStatus(newStatus) {
                 "session-id": sessionId
             },
             body: JSON.stringify({
-                window_id: operator.window_id,
+                window_id: details.window_id,
                 status: newStatus
             })
         });
@@ -634,6 +622,8 @@ async function changeWindowStatus(newStatus) {
         }
 
         const result = await res.json();
+        
+        // Обновляем UI (подсветка кнопок)
         updateStatusButtons(result.status); 
 
     } catch (e) {
