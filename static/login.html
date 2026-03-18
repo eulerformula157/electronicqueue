@@ -85,28 +85,36 @@ const API_URL = "http://localhost:8000";
 async function submitLogin() {
     const login = document.getElementById("login").value;
     const password = document.getElementById("password").value;
+    const errorDiv = document.getElementById("login-error");
 
-    fetch(`${API_URL}/login`, {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({login, password})
-    })
-    .then(res => {
-        if (!res.ok) throw new Error("Неверный логин или пароль");
-        return res.json();
-    })
-	.then(data => {
-		console.log("LOGIN RESPONSE:", data);
+    errorDiv.textContent = "";
 
-		sessionStorage.setItem("session_id", data.session_id);
+    try {
+        const response = await fetch(`${API_URL}/login`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({login, password})
+        });
 
-		console.log("SESSION SAVED:", sessionStorage.getItem("session_id"));
+        const data = await response.json();
 
-		window.location.href = "/static/operator.html";
-	})
-    .catch(err => {
-        document.getElementById("login-error").textContent = err.message;
-    });
+        if (!response.ok) {
+            throw new Error(data.detail || "Ошибка входа");
+        }
+
+        // Сохраняем сессию
+        sessionStorage.setItem("session_id", data.session_id);
+
+        // Перенаправляем в зависимости от роли
+        if (data.role === "admin") {
+            window.location.href = "/static/admin.html";
+        } else {
+            window.location.href = "/static/operator.html";
+        }
+
+    } catch (err) {
+        errorDiv.textContent = err.message;
+    }
 }
 </script>
 

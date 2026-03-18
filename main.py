@@ -102,6 +102,34 @@ def verify_session(session_id: str = Header(...)):
     finally:
         db.close()
 
+def verify_admin_session(session_id: str = Header(None)):
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Отсутствует session-id")
+    
+    db = SessionLocal()
+    # Проверяем сессию именно в таблице админов
+    session = db.query(AdminSession).filter(AdminSession.session_id == session_id).first()
+    if not session:
+        db.close()
+        raise HTTPException(status_code=401, detail="Неверная сессия администратора")
+    
+    admin = db.query(Admin).filter(Admin.id == session.admin_id).first()
+    db.close()
+    
+    if not admin:
+        raise HTTPException(status_code=403, detail="Администратор не найден")
+    return admin
+
+def verify_admin(session_id: str):
+    session = db.get_session(session_id)
+
+    if not session:
+        raise HTTPException(401, "Not authenticated")
+
+    if session.role != "admin":
+        raise HTTPException(403, "Not admin")
+
+    return session
 # Разрешение для CORS
 
 app.add_middleware(
@@ -168,12 +196,23 @@ class OperatorLoginUpdate(BaseModel):
 class ServiceStatusUpdate(BaseModel):
     status: str  # "active" или "inactive"
 
-# В модели SQLAlchemy
 class UserSession(Base):
     __tablename__ = "sessions"
     session_id = Column(String, primary_key=True) 
     operator_id = Column(Integer, ForeignKey("operators.id"))
     created_at = Column(TIMESTAMP, server_default=text("NOW()"), nullable=False)
+
+class Admin(Base):
+    __tablename__ = "admins"
+    id = Column(Integer, primary_key=True)
+    login = Column(String, unique=True)
+    password = Column(String)
+    name = Column(String)
+
+class AdminSession(Base):
+    __tablename__ = "admin_sessions"
+    session_id = Column(String, primary_key=True)
+    admin_id = Column(Integer, ForeignKey("admins.id"))
 
 # ------------------ Pydantic схемы ------------------
 
@@ -220,7 +259,7 @@ class WindowStatusUpdate(BaseModel):
 # ------------------ Эндпоинты ------------------
 
 @app.post("/services/", tags=["Services"])
-async def create_service(service: ServiceCreate):
+async def create_service(service: ServiceCreate, admin: Admin = Depends(verify_admin_session)):
     db = SessionLocal()
     db_service = Service(**service.dict())
     db.add(db_service)
@@ -242,7 +281,7 @@ def list_services():
     return services
 
 @app.patch("/services/{service_id}", tags=["Services"])
-async def rename_service(service_id: int, data: ServiceRename):
+async def rename_service(service_id: int, data: ServiceRename, admin: Admin = Depends(verify_admin_session)):
     db = SessionLocal()
 
     service = db.query(Service).filter(Service.id == service_id).first()
@@ -267,7 +306,8 @@ async def rename_service(service_id: int, data: ServiceRename):
 @app.patch("/services/{service_id}/status", tags=["Services"])
 async def update_service_status(
     service_id: int = Path(..., gt=0),
-    data: ServiceStatusUpdate = ...
+    data: ServiceStatusUpdate = ...,
+    admin: Admin = Depends(verify_admin_session)
 ):
     db = SessionLocal()
     try:
@@ -514,7 +554,7 @@ def list_tickets():
     return tickets
 
 @app.post("/operators/", tags=["Operators"])
-def create_operator(operator: OperatorCreate):
+def create_operator(operator: OperatorCreate, admin: Admin = Depends(verify_admin_session)):
     db = SessionLocal()
     db_operator = Operator(**operator.dict())
     db.add(db_operator)
@@ -524,26 +564,29 @@ def create_operator(operator: OperatorCreate):
     return db_operator
 
 @app.get("/operators/", tags=["Operators"])
-def list_operators():
+async def list_operators(admin: Admin = Depends(verify_admin_session)): # Добавили защиту
     db = SessionLocal()
     operators = db.query(Operator).order_by(Operator.id).all()
     db.close()
     return operators
 
 
-      
 @app.post("/windows/", tags=["Windows"])
-def create_window(window: WindowCreate):
+def create_window(window: WindowCreate, admin: Admin = Depends(verify_admin_session)):
     db = SessionLocal()
-    db_window = Window(**window.dict())
+    # Проверяем, нет ли уже окна с таким именем (опционально, но полезно)
+    existing = db.query(Window).filter(Window.name == window.name).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Window already exists")
+    
+    db_window = Window(name=window.name, status="offline")
     db.add(db_window)
     db.commit()
     db.refresh(db_window)
-    db.close()
     return db_window
 
 @app.get("/windows/", tags=["Windows"])
-def list_windows():
+async def list_windows(admin: Admin = Depends(verify_admin_session)):
     db = SessionLocal()
     windows = db.query(Window).order_by(Window.id).all()
     db.close()
@@ -558,7 +601,7 @@ async def update_window_status(window_id: int, data: WindowStatusUpdate = Body(.
             raise HTTPException(status_code=404, detail="Window not found")
 
         # Проверка допустимых статусов
-        if data.status not in ["online", "offline", "maintenance"]:
+        if data.status not in ["online", "offline", "break"]:
             raise HTTPException(status_code=400, detail="Invalid status")
 
         window.status = data.status
@@ -576,7 +619,7 @@ async def update_window_status(window_id: int, data: WindowStatusUpdate = Body(.
         db.close()
 
 @app.post("/window-services/", tags=["Windows"])
-def create_window_service(data: WindowServiceCreate):
+def create_window_service(data: WindowServiceCreate, admin: Admin = Depends(verify_admin_session)):
     db = SessionLocal()
 
     existing = db.query(WindowService).filter_by(
@@ -608,7 +651,7 @@ def list_window_services():
     return result
 
 @app.get("/window-services/{window_id}", tags=["Windows"])
-def get_window_services(window_id: int):
+def get_window_services(window_id: int, admin: Admin = Depends(verify_admin_session)):
     db = SessionLocal()
 
     services = (
@@ -646,7 +689,7 @@ def update_window_services(window_id: int, service_ids: list[int]):
     return {"window_id": window_id, "services": list(new_ids)}
 
 @app.delete("/window-services/{window_id}/{service_id}", tags=["Windows"])
-def delete_window_service(window_id: int, service_id: int):
+def delete_window_service(window_id: int, service_id: int, admin: Admin = Depends(verify_admin_session)):
 
     db = SessionLocal()
 
@@ -675,6 +718,24 @@ class LoginRequest(BaseModel):
 async def login(data: LoginRequest):
     db = SessionLocal()
     try:
+        # 1. Сначала ищем в таблице администраторов
+        admin = db.query(Admin).filter(
+            Admin.login == data.login, 
+            Admin.password == data.password
+        ).first()
+
+        if admin:
+            token = secrets.token_hex(32)
+            new_session = AdminSession(session_id=token, admin_id=admin.id)
+            db.add(new_session)
+            db.commit()
+            return {
+                "session_id": token,
+                "name": admin.name,
+                "role": "admin" # Флаг для фронтенда
+            }
+
+        # 2. Если не админ, ищем в операторах
         operator = db.query(Operator).filter(
             Operator.login == data.login, 
             Operator.password == data.password
@@ -691,36 +752,31 @@ async def login(data: LoginRequest):
         )
         db.add(new_session)
         
-        # Логика онлайн-статуса
+        # Логика статуса окна (из вашего кода)
         if operator.window_id:
             window = db.query(Window).filter(Window.id == operator.window_id).first()
             if window:
                 window.status = "online"
-                # ВАЖНО: сначала сохраняем изменения в БД
                 db.flush() 
-                
-                # Теперь обновляем услуги и уведомляем
                 update_services_status_for_window(db, window.id)
-                
-                # Фиксируем изменения в БД
                 db.commit()
-                
-                # Уведомляем клиентов через WebSocket
                 await manager.broadcast({
                     "type": "services_updated",
                     "window_id": operator.window_id
                 })
         else:
-            db.commit() # Если окна нет, просто коммитим сессию
+            db.commit()
 
         return {
             "session_id": token,
             "name": operator.name,
-            "window_id": operator.window_id
+            "window_id": operator.window_id,
+            "role": "operator" # Флаг для фронтенда
         }
 
     except Exception as e:
         db.rollback()
+        if isinstance(e, HTTPException): raise e
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
@@ -729,30 +785,38 @@ async def login(data: LoginRequest):
 async def logout(session_id: str = Header(...)):
     db: Session = SessionLocal()
     try:
-        # 1. Сначала находим текущую сессию, чтобы узнать ID оператора
+        # --- ЛОГИКА ДЛЯ ОПЕРАТОРОВ (сохранена) ---
         current_session = db.query(UserSession).filter(UserSession.session_id == session_id).first()
         
         if current_session:
             operator_id = current_session.operator_id
-            
-            # 2. Находим оператора и его окно
             operator = db.query(Operator).filter(Operator.id == operator_id).first()
+            
             if operator and operator.window_id:
                 window = db.query(Window).filter(Window.id == operator.window_id).first()
                 if window:
-                    # Меняем статус окна
                     window.status = "offline"
                     db.commit()
-                    
-                    # Обновляем услуги
                     update_services_status_for_window(db, window.id)
                     await manager.broadcast({"type": "services_updated"})
             
-            # 3. Удаляем ВСЕ сессии этого оператора
+            # Удаляем сессии оператора
             db.query(UserSession).filter(UserSession.operator_id == operator_id).delete()
             db.commit()
+            return {"status": "success", "role": "operator"}
+
+        # --- НОВАЯ ЛОГИКА ДЛЯ АДМИНИСТРАТОРОВ ---
+        admin_session = db.query(AdminSession).filter(AdminSession.session_id == session_id).first()
+        
+        if admin_session:
+            # Предположим, в таблице AdminSession есть поле admin_id
+            current_admin_id = admin_session.admin_id 
+            db.query(AdminSession).filter(AdminSession.admin_id == current_admin_id).delete()
+            db.commit()
+            return {"status": "success", "role": "admin"}
             
-        return {"status": "success"}
+        return {"status": "session_not_found"}
+
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -766,6 +830,13 @@ def get_me(operator: Operator = Depends(verify_session)):
         "name": operator.name,
         "window_id": operator.window_id
     }
+
+@app.get("/auth/admin", tags=["Auth"])
+def admin_get_operators(admin: Admin = Depends(verify_admin_session)):
+    db = SessionLocal()
+    operators = db.query(Operator).order_by(Operator.id).all()
+    db.close()
+    return operators
 
 def get_operator_by_session(session_id: str = Header(..., alias="session-id")):
     if not session_id:
@@ -844,15 +915,14 @@ def get_current_ticket(operator: Operator = Depends(verify_session)):
     finally:
         db.close()
 
-@app.delete("/services/{service_id}", tags=["Services"])
-async def delete_service(service_id: int):
+@app.delete("/services/{service_id}")
+async def delete_service(service_id: int, admin: Admin = Depends(verify_admin_session)): # Добавили проверку
     db = SessionLocal()
-
     service = db.query(Service).filter(Service.id == service_id).first()
     if not service:
         db.close()
-        raise HTTPException(status_code=404, detail="Service not found")
-
+        raise HTTPException(status_code=404, detail="Услуга не найдена")
+    
     db.delete(service)
 
     await manager.broadcast({
@@ -865,7 +935,7 @@ async def delete_service(service_id: int):
     return {"message": "Service deleted"}
     
 @app.delete("/windows/{window_id}", tags=["Windows"])
-def delete_window(window_id: int):
+def delete_window(window_id: int, admin: Admin = Depends(verify_admin_session)): # Защищаем эндпоинт
     db = SessionLocal()
 
     window = db.query(Window).filter(Window.id == window_id).first()
@@ -880,7 +950,7 @@ def delete_window(window_id: int):
     return {"message": "Window deleted"}
  
 @app.patch("/windows/{window_id}", tags=["Windows"])
-def rename_window(window_id: int, data: WindowCreate):
+def rename_window(window_id: int, data: WindowCreate, admin: Admin = Depends(verify_admin_session)):
     db = SessionLocal()
     window = db.query(Window).filter(Window.id == window_id).first()
     if not window:
@@ -893,19 +963,16 @@ def rename_window(window_id: int, data: WindowCreate):
     return window
  
 @app.delete("/operators/{operator_id}", tags=["Operators"])
-def delete_operator(operator_id: int):
+async def delete_operator(operator_id: int, admin: Admin = Depends(verify_admin_session)): # Добавили Depends
     db = SessionLocal()
-
-    operator = db.query(Operator).filter(Operator.id == operator_id).first()
-    if not operator:
+    op = db.query(Operator).filter(Operator.id == operator_id).first()
+    if not op:
         db.close()
-        raise HTTPException(status_code=404, detail="Operator not found")
-
-    db.delete(operator)
+        raise HTTPException(status_code=404, detail="Оператор не найден")
+    db.delete(op)
     db.commit()
     db.close()
-
-    return {"message": "Operator deleted"}
+    return {"status": "ok"}
     
 @app.delete("/tickets/{ticket_id}", tags=["Tickets"])
 def delete_ticket(ticket_id: int):
@@ -963,7 +1030,7 @@ def update_operator(operator_id: int, data: dict):
     return op
 
 @app.put("/operators/{operator_id}/login", tags=["Operators"])
-def update_operator_login(operator_id: int = Path(..., gt=0), data: OperatorLoginUpdate = ...):
+def update_operator_login(operator_id: int = Path(..., gt=0), data: OperatorLoginUpdate = ..., admin: Admin = Depends(verify_admin_session)):
     db: Session = SessionLocal()
     operator = db.query(Operator).filter(Operator.id == operator_id).first()
     if not operator:
