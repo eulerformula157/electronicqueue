@@ -724,70 +724,129 @@ loadOperators()
 //let openedServicesRow = null;
 
 async function editServices(operator_id, window_id) {
-    // Если уже открыта та же строка — закрываем
     if (openedServicesRow && openedServicesRow.dataset.operatorId == operator_id) {
         openedServicesRow.remove();
         openedServicesRow = null;
         return;
     }
-
-    // Закрываем предыдущую
     openedServicesRow?.remove();
-    openedServicesRow = null;
 
-    // Получаем услуги окна с сервера
+    // Загружаем текущие услуги окна
     let ws = await fetchJSON(`${API}/window-services/${window_id}`);
-    // ws — массив объектов {window_id, service_id}
-    let selected = ws.map(x => x.service_id);
-
-    // Создаем HTML для строки с чекбоксами
-    let html = `<tr id="servicesRow" data-operator-id="${operator_id}">
-        <td></td><td></td><td></td>
-        <td>
-            <div class="servicesBoxServices" style="max-width:600px">
-                <b>Услуги окна</b><br><br>`;
-
-    for (let s of services) {
-        let checked = selected.includes(s.id) ? "checked" : "";
-        html += `<label><input type="checkbox" value="${s.id}" ${checked}> ${s.name}</label><br>`;
+    
+    // Создаем карту: ID услуги -> Приоритет
+    let selectedMap = {};
+    if (Array.isArray(ws)) {
+        ws.forEach(item => {
+            // Если в БД приоритет null, используем 1
+            selectedMap[item.service_id] = item.priority ?? 1;
+        });
     }
 
-    html += `<br><button onclick="saveServices(${window_id})">Сохранить</button>
+    let html = `<tr id="servicesRow" data-operator-id="${operator_id}">
+        <td colspan="3"></td>
+        <td>
+            <div class="servicesBoxServices" style="max-width:600px; background:#fff; padding:15px; border:1px solid #ccc; border-radius:8px;">
+                <b>Настройка услуг (меньше число - выше приоритет)</b><br><br>`;
+
+    for (let s of services) {
+        let isActive = selectedMap.hasOwnProperty(s.id);
+        let checked = isActive ? "checked" : "";
+        let prio = isActive ? selectedMap[s.id] : 1;
+        let disabled = isActive ? "" : "disabled";
+
+        html += `
+            <div style="margin-bottom:8px; display:flex; align-items:center;">
+                <label style="flex:1">
+                    <input type="checkbox" class="srv-check" value="${s.id}" ${checked} 
+                           onchange="document.getElementById('prio-${s.id}').disabled = !this.checked"> 
+                    ${s.name}
+                </label>
+                <input type="number" id="prio-${s.id}" class="srv-prio" 
+                       value="${prio}" min="1" max="100" 
+                       style="width:60px" ${disabled}>
+            </div>`;
+    }
+
+    html += `<br><button onclick="saveServicesWithPriority(${window_id})">Сохранить</button>
             </div>
         </td>
     </tr>`;
 
-    // Вставляем после строки с оператором
     let row = document.getElementById(`row-${operator_id}`);
     row.insertAdjacentHTML("afterend", html);
-
     openedServicesRow = document.getElementById("servicesRow");
 }
 
-async function saveServices(window_id) {
-    if (!openedServicesRow) return;
+async function saveServicesWithPriority(windowId) {
+    const services = [];
 
-    // Собираем выбранные услуги
-    let checks = openedServicesRow.querySelectorAll("input[type=checkbox]");
-    let ids = Array.from(checks)
-                   .filter(c => c.checked)
-                   .map(c => parseInt(c.value));
+    document.querySelectorAll('.srv-check').forEach(cb => {
+        if (cb.checked) {
+            const serviceId = parseInt(cb.value);
+            const prioInput = document.getElementById(`prio-${serviceId}`);
 
-    // Отправляем на сервер
-    let res = await fetch(`${API}/window-services/${window_id}`, {
-        method: "PUT",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify(ids)
+            services.push({
+                service_id: serviceId,
+                priority: parseInt(prioInput.value) || 1
+            });
+        }
     });
 
-    if (!res.ok) {
-        let err = await res.text();
-        return alert("Ошибка при сохранении услуг: " + err);
-    }
+    const payload = { services };
 
-    alert("Услуги обновлены");
-    openedServicesRow.remove();
-    openedServicesRow = null;
+    const res = await fetchJSON(`${API}/window-services/${windowId}`, {
+        method: "PUT",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+    });
+
+    if (res) {
+        alert("Настройки сохранены");
+        loadOperators();
+    }
+}
+
+async function saveServices(window_id) {
+    const container = document.getElementById("servicesRow");
+    // Находим все чекбоксы услуг
+    const checkboxes = container.querySelectorAll(".srv-checkbox");
+    
+    let servicesToSave = [];
+    
+    checkboxes.forEach(cb => {
+        if (cb.checked) {
+            const srvId = parseInt(cb.value);
+            // Находим соответствующий инпут приоритета по ID
+            const prioInput = document.getElementById(`prio-input-${srvId}`);
+            
+            servicesToSave.push({
+                service_id: srvId,
+                priority: parseInt(prioInput.value) || 1
+            });
+        }
+    });
+
+    try {
+        // Важно: отправляем объект с ключом "services", как ожидает Pydantic на бэке
+		const res = await fetchJSON(`${API}/window-services/${windowId}`, {
+			method: "PUT",
+			headers: {
+				"Content-Type": "application/json"
+			},
+			body: JSON.stringify(payload)
+		});
+
+        alert("Изменения успешно сохранены");
+        // Закрываем строку настроек
+        openedServicesRow.remove();
+        openedServicesRow = null;
+    } catch (e) {
+        console.error("Save error:", e);
+        alert("Ошибка при сохранении приоритетов");
+    }
 }
 
 ////////////////////////////////////////

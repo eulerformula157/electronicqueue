@@ -214,6 +214,11 @@ class AdminSession(Base):
     session_id = Column(String, primary_key=True)
     admin_id = Column(Integer, ForeignKey("admins.id"))
 
+class PriorityUpdate(BaseModel):
+    window_id: int
+    service_id: int
+    priority: int
+
 # ------------------ Pydantic схемы ------------------
 
 class ServiceCreate(BaseModel):
@@ -235,6 +240,7 @@ class WindowService(Base):
     __tablename__ = "window_services"
     window_id = Column(Integer, ForeignKey("windows.id"), primary_key=True)
     service_id = Column(Integer, ForeignKey("services.id"), primary_key=True)
+    priority = Column(Integer, default=1)
 
 class RedirectRequest(BaseModel):
     ticket_id: int
@@ -256,6 +262,17 @@ class WindowStatusUpdateOp(BaseModel):
 
 class WindowStatusUpdate(BaseModel):
     status: str
+    
+class ServicePriority(BaseModel):
+    service_id: int
+    priority: int
+
+class WindowServiceItem(BaseModel):
+    service_id: int
+    priority: int
+
+class WindowServicesUpdate(BaseModel):
+    services: List[WindowServiceItem]
 # ------------------ Эндпоинты ------------------
 
 @app.post("/services/", tags=["Services"])
@@ -402,60 +419,55 @@ async def finish_ticket(operator: Operator = Depends(verify_session)):
 @app.post("/tickets/next", tags=["Tickets"])
 async def call_next_ticket(operator: Operator = Depends(verify_session)):
     db = SessionLocal()
+    try:
+        if not operator.window_id:
+            return {"detail": "Оператору не назначено окно"}
 
-    if not operator.window_id:
+        # Проверяем, не обслуживается ли уже клиент
+        current = db.query(Ticket).filter(
+            Ticket.window_id == operator.window_id,
+            Ticket.status == "called"
+        ).first()
+
+        if current:
+            return {"detail": f"Сначала завершите клиента: {current.number}"}
+
+        # Ищем подходящий билет с учетом приоритета окна
+        # Сортируем: сначала по приоритету (asc - высокий приоритет вперед), 
+        # затем по времени создания (asc - старые билеты вперед)
+        ticket = (
+            db.query(Ticket)
+            .join(WindowService, Ticket.service_id == WindowService.service_id)
+            .filter(
+                WindowService.window_id == operator.window_id,
+                Ticket.status == "waiting"
+            )
+            .order_by(
+                WindowService.priority.asc(),  # Сначала услуги с высоким приоритетом
+                Ticket.created_at.asc()         # Затем самые старые в этой категории
+            )
+            .first()
+        )
+
+        if not ticket:
+            return {"detail": "Нет ожидающих билетов"}
+
+        ticket.status = "called"
+        ticket.window_id = operator.window_id
+        ticket.called_at = text("CURRENT_TIMESTAMP")
+
+        db.commit()
+        db.refresh(ticket)
+        
+        # ДОБАВЬТЕ ЭТО: возвращаем объект с именем услуги
+        return {
+            "id": ticket.id,
+            "number": ticket.number,
+            "status": ticket.status,
+            "service_name": ticket.service.name if ticket.service else "Услуга не найдена"
+        }
+    finally:
         db.close()
-        return {"detail": "Оператору не назначено окно"}
-
-    # Проверяем, не обслуживается ли уже клиент
-    current = db.query(Ticket).filter(
-        Ticket.window_id == operator.window_id,
-        Ticket.status == "called"
-    ).first()
-
-    if current:
-        db.close()
-        return {"detail": f"Сначала завершите клиента: {current.number}"}
-
-    # Получаем услуги этого окна
-    window_services = db.query(WindowService).filter(
-        WindowService.window_id == operator.window_id
-    ).all()
-
-    service_ids = [ws.service_id for ws in window_services]
-
-    if not service_ids:
-        db.close()
-        return {"detail": "У окна нет назначенных услуг"}
-
-    # Ищем самый долгождущий билет среди услуг окна
-    ticket = db.query(Ticket)\
-        .filter(
-            Ticket.status == "waiting",
-            Ticket.service_id.in_(service_ids)
-        )\
-        .order_by(asc(Ticket.created_at))\
-        .first()
-
-    if not ticket:
-        db.close()
-        return {"detail": "Нет ожидающих билетов"}
-
-    # Назначаем билет окну
-    ticket.status = "called"
-    ticket.window_id = operator.window_id
-    ticket.called_at = text("CURRENT_TIMESTAMP")
-
-    await manager.broadcast({
-        "type": "queue_updated"
-    })    
-
-    db.commit()
-    db.refresh(ticket)
-    asyncio.create_task(broadcast_board())
-    db.close()
-
-    return ticket
     
 @app.post("/tickets/cancel", tags=["Tickets"])
 async def cancel_current_ticket(operator: Operator = Depends(verify_session)):
@@ -497,38 +509,40 @@ async def cancel_current_ticket(operator: Operator = Depends(verify_session)):
 @app.get("/tickets/my-queue", tags=["Tickets"])
 def get_my_queue(operator: Operator = Depends(verify_session)):
     db = SessionLocal()
+    try:
+        if not operator.window_id:
+            return []
 
-    if not operator.window_id:
+        # Соединяем билеты с настройками приоритетов конкретного окна
+        tickets = (
+            db.query(Ticket)
+            .join(WindowService, Ticket.service_id == WindowService.service_id)
+            .filter(
+                WindowService.window_id == operator.window_id,
+                Ticket.status == "waiting"
+            )
+            .order_by(
+                WindowService.priority.asc(), # Самые важные услуги сверху
+                Ticket.created_at.asc()        # Внутри приоритета — по времени записи
+            )
+            .all()
+        )
+
+        result = []
+        for t in tickets:
+            result.append({
+                "id": t.id,
+                "number": t.number,
+                "service_id": t.service_id,
+                "service_name": t.service.name if t.service else "Неизвестно",
+                "priority": db.query(WindowService.priority)
+                              .filter_by(window_id=operator.window_id, service_id=t.service_id)
+                              .scalar()
+            })
+        
+        return result
+    finally:
         db.close()
-        return []
-
-    # Получаем услуги, которые назначены на окно оператора
-    window_services = db.query(WindowService).filter(
-        WindowService.window_id == operator.window_id
-    ).all()
-    service_ids = [ws.service_id for ws in window_services]
-
-    if not service_ids:
-        db.close()
-        return []
-
-    tickets = db.query(Ticket)\
-        .filter(Ticket.status == "waiting", Ticket.service_id.in_(service_ids))\
-        .order_by(Ticket.created_at)\
-        .all()
-
-    # Формируем ответ вручную, добавляя имя услуги
-    result = []
-    for t in tickets:
-        result.append({
-            "id": t.id,
-            "number": t.number,
-            "service_id": t.service_id,
-            "service_name": t.service.name if t.service else "Неизвестно"
-        })
-    
-    db.close()
-    return result
 
 @app.post("/tickets/redirect", tags=["Tickets"])
 async def redirect_ticket(data: RedirectRequest):
@@ -735,30 +749,33 @@ def get_window_services(window_id: int, admin: Admin = Depends(verify_admin_sess
     db.close()
     return services
 
-@app.put("/window-services/{window_id}", tags=["Windows"])
-def update_window_services(window_id: int, service_ids: list[int]):
-
+@app.put("/window-services/{window_id}")
+async def update_window_services(
+    window_id: int, 
+    data: WindowServicesUpdate, # Он ждет {"services": [...]}
+    admin: Admin = Depends(verify_admin_session)
+    ):
     db = SessionLocal()
-
-    current = db.query(WindowService).filter_by(window_id=window_id).all()
-    current_ids = {x.service_id for x in current}
-
-    new_ids = set(service_ids)
-
-    # удалить лишние
-    for ws in current:
-        if ws.service_id not in new_ids:
-            db.delete(ws)
-
-    # добавить новые
-    for sid in new_ids:
-        if sid not in current_ids:
-            db.add(WindowService(window_id=window_id, service_id=sid))
-
-    db.commit()
-    db.close()
-
-    return {"window_id": window_id, "services": list(new_ids)}
+    try:
+        # Удаляем старое
+        db.query(WindowService).filter(WindowService.window_id == window_id).delete()
+        
+        # Добавляем новое
+        for item in data.services:
+            new_ws = WindowService(
+                window_id=window_id,
+                service_id=item.service_id,
+                priority=item.priority
+            )
+            db.add(new_ws)
+        
+        db.commit()
+        return {"status": "ok"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
 
 @app.delete("/window-services/{window_id}/{service_id}", tags=["Windows"])
 def delete_window_service(window_id: int, service_id: int, admin: Admin = Depends(verify_admin_session)):
@@ -1210,29 +1227,33 @@ async def websocket_operator(websocket: WebSocket, operator_id: int):
 async def get_my_details(operator: Operator = Depends(verify_session)):
     db = SessionLocal()
     try:
-        # 1. Получаем информацию об окне
         window = None
         if operator.window_id:
             window = db.query(Window).filter(Window.id == operator.window_id).first()
         
-        # 2. Получаем названия услуг, привязанных к этому окну
-        service_names = []
+        services_with_priority = []
         if operator.window_id:
-            service_names = (
-                db.query(Service.name)
+            # Получаем и название услуги, и её приоритет из связующей таблицы
+            results = (
+                db.query(Service.name, WindowService.priority)
                 .join(WindowService, Service.id == WindowService.service_id)
                 .filter(WindowService.window_id == operator.window_id)
+                .order_by(WindowService.priority.desc()) # Сортируем по важности
                 .all()
             )
-            # Извлекаем строки из кортежей SQLAlchemy
-            service_names = [s[0] for s in service_names]
+            
+            # Формируем список словарей для фронтенда
+            services_with_priority = [
+                {"name": name, "priority": priority} 
+                for name, priority in results
+            ]
 
         return {
             "operator_name": operator.name,
             "window_id": operator.window_id,
             "window_name": window.name if window else "Не назначено",
             "window_status": window.status if window else "offline",
-            "services": service_names
+            "services": services_with_priority # Теперь это список объектов
         }
     finally:
         db.close()
@@ -1309,23 +1330,32 @@ def get_operator_state(operator_id: int):
 
         window = db.query(Window).filter(Window.id == operator.window_id).first()
 
-        window_services = db.query(WindowService).filter(WindowService.window_id == operator.window_id).all()
-        service_ids = [ws.service_id for ws in window_services]
-
-        services = db.query(Service).filter(Service.id.in_(service_ids)).all()
-
-        tickets = db.query(Ticket)\
-            .filter(Ticket.status=="waiting", Ticket.service_id.in_(service_ids))\
-            .order_by(Ticket.created_at).all()
+        # Очередь (уже с учетом приоритета, как мы делали ранее)
+        tickets = (
+            db.query(Ticket)
+            .join(WindowService, Ticket.service_id == WindowService.service_id)
+            .filter(WindowService.window_id == operator.window_id, Ticket.status == "waiting")
+            .order_by(WindowService.priority.desc(), Ticket.created_at.asc())
+            .all()
+        )
 
         current_ticket = db.query(Ticket)\
-            .filter(Ticket.window_id==operator.window_id, Ticket.status=="called")\
+            .filter(Ticket.window_id == operator.window_id, Ticket.status == "called")\
             .first()
+
+        # Услуги с приоритетами
+        services_data = (
+            db.query(Service.name, WindowService.priority)
+            .join(WindowService, Service.id == WindowService.service_id)
+            .filter(WindowService.window_id == operator.window_id)
+            .order_by(WindowService.priority.desc())
+            .all()
+        )
 
         return {
             "operator": {"id": operator.id, "name": operator.name},
             "window": {"id": window.id, "name": window.name, "status": window.status if window else "offline"},
-            "services": [s.name for s in services],
+            "services": [{"name": s[0], "priority": s[1]} for s in services_data],
             "queue": [{"id": t.id, "number": t.number} for t in tickets],
             "current_ticket": {"id": current_ticket.id, "number": current_ticket.number} if current_ticket else None
         }
@@ -1333,6 +1363,18 @@ def get_operator_state(operator_id: int):
         db.close()
 
     
+@app.patch("/window-services/priority")
+async def update_priority(data: PriorityUpdate, admin: Admin = Depends(verify_admin_session)):
+    db = SessionLocal()
+    ws = db.query(WindowService).filter(
+        WindowService.window_id == data.window_id, 
+        WindowService.service_id == data.service_id
+    ).first()
+    if ws:
+        ws.priority = data.priority
+        db.commit()
+    db.close()
+    return {"status": "updated"}
 
 # ------------------ Создание таблиц ------------------
 Base.metadata.create_all(bind=engine)

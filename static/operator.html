@@ -392,6 +392,34 @@ input:checked + .slider:before {
     color: var(--success);
     text-align: center;
 }
+
+.service-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 4px 0;
+}
+
+.service-priority {
+    font-weight: 800;
+    font-size: 1.2rem;
+    color: var(--primary);
+    min-width: 20px;
+}
+
+.service-name {
+    font-size: 1.05rem;
+    color: var(--text-muted);
+}
+
+.current-service {
+    font-size: 1.4rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-top: -10px;
+    margin-bottom: 20px;
+}
 </style>
 </head>
 
@@ -426,6 +454,7 @@ input:checked + .slider:before {
     <section class="glass-card display-zone">
         <div class="ticket-label">ТЕКУЩИЙ КЛИЕНТ</div>
         <div id="current" class="ticket-number">--</div>
+		<div id="current-service" class="current-service">—</div>
         
 		
         <div class="button-group" style="margin-top: 40px; justify-content: center;">
@@ -569,9 +598,16 @@ async function loadOperatorInfo() {
         if (!res.ok) throw new Error("Ошибка загрузки");
         const data = await res.json();
 
-        const servicesHtml = data.services && data.services.length > 0 
-            ? data.services.map(s => `<span class="service-tag">${s}</span>`).join("")
-            : '<span style="color: var(--text-muted)">Услуги не назначены</span>';
+const servicesHtml = data.services && data.services.length > 0 
+    ? data.services
+        .sort((a, b) => a.priority - b.priority) // 1 = самый высокий
+        .map(s => `
+            <div class="service-row">
+                <span class="service-priority">${s.priority}</span>
+                <span class="service-name">${s.name}</span>
+            </div>
+        `).join("")
+    : '<span style="color: var(--text-muted)">Услуги не назначены</span>';
 
         // Метки: ЧЕРНЫЕ (font-weight 800), Данные: СЕРЫЕ (font-weight 600)
         document.getElementById("operator-info").innerHTML = `
@@ -631,19 +667,11 @@ async function loadQueue() {
    Вызов следующего клиента
 ========================= */
 async function callNext() {
-    // 1. Проверка на активного клиента (самый приоритетный блок)
     if (currentTicketId !== null && currentTicketId !== undefined) {
         showToast("Закончите с текущим клиентом!", "danger");
         return;
     }
 
-    const stopBtn = document.getElementById("btn-stop");
-    const isBreak = stopBtn.classList.contains("btn-warning-active");
-
-    if (isBreak) {
-        await changeWindowStatus('online');
-    }
-	
     try {
         const res = await fetch(`${API_URL}/tickets/next`, {
             method: "POST",
@@ -656,21 +684,24 @@ async function callNext() {
         const ticket = await res.json();
 
         if (res.ok && ticket.id) {
-            document.getElementById("current").textContent = ticket.number;
+            // Обновляем текущий билет и услугу
             currentTicketId = ticket.id;
-            // Скрываем тост, если он висел
+            document.getElementById("current").textContent = ticket.number;
+            document.getElementById("current-service").textContent =
+                ticket.service_name || "Услуга не указана";
+
             document.getElementById("toast-notification").style.display = "none";
         } else {
-            // Если в очереди никого нет - показываем ЖЕЛТЫМ или серым, а не красным
             showToast(ticket.detail || "В очереди никого нет", "warning");
         }
+
     } catch (e) {
         console.error(e);
         showToast("Ошибка соединения с сервером", "danger");
     }
 
     loadQueue();
-	startCancelTimer();
+    startCancelTimer();
 }
 
 // Улучшенная функция уведомлений с поддержкой разных цветов
@@ -916,16 +947,18 @@ async function loadCurrentTicket() {
         const data = await res.json();
 
         if (data.ticket) {
-
             currentTicketId = data.ticket.id;
-
             document.getElementById("current").textContent = data.ticket.number;
 
-        } else {
+            // Ищем название услуги по service_id
+            const service = allServices.find(s => s.id === data.ticket.service_id);
+            document.getElementById("current-service").textContent =
+                service?.name || "Услуга не указана";
 
+        } else {
             currentTicketId = null;
             document.getElementById("current").textContent = "Окно свободно";
-
+            document.getElementById("current-service").textContent = "";
         }
 
     } catch (e) {
@@ -937,32 +970,54 @@ async function loadCurrentTicket() {
 async function logout() {
     if (!confirm("Вы уверены, что хотите завершить работу?")) return;
 
+    const sessionId = sessionStorage.getItem("session_id");
+
     try {
-        await fetch(`${API_URL}/logout`, {
+        // Используем обычный fetch для кнопки logout
+        const res = await fetch(`${API_URL}/logout`, {
             method: "POST",
-            headers: { "session-id": sessionStorage.getItem("session_id") }
+            headers: { "session-id": sessionId }
         });
-        
-        // Очищаем локальное хранилище и перенаправляем
-        sessionStorage.removeItem("session_id");
-        window.location.href = "/static/login.html";
+
+        // Игнорируем ошибки сети, но очищаем локально
     } catch (e) {
-        console.error("Ошибка при выходе:", e);
-        // Даже если ошибка сети, принудительно выкидываем
+        console.error(e);
+    } finally {
+        sessionStorage.removeItem("session_id");
         window.location.href = "/static/login.html";
     }
 }
 
 let isNavigating = false;
+let isReloading = false;
 
-window.addEventListener("beforeunload", () => {
-    // Если пользователь переходит по ссылке или обновляет страницу, 
-    // мы не хотим убивать сессию, если он вернется через секунду
-    if (!isNavigating) {
-        navigator.sendBeacon(`${API_URL}/logout`, JSON.stringify({
-            session_id: sessionStorage.getItem("session_id")
-        }));
+// Отслеживаем F5 / Ctrl+R
+window.addEventListener("keydown", function (event) {
+    if (event.key === "F5" || (event.ctrlKey && event.key.toLowerCase() === "r")) {
+        isReloading = true;
     }
+});
+
+// Отслеживаем навигацию по ссылкам
+document.addEventListener("click", function (event) {
+    const link = event.target.closest("a");
+    if (link) isNavigating = true;
+});
+
+// Единый обработчик закрытия страницы
+window.addEventListener("beforeunload", function () {
+    if (isReloading || isNavigating) return;
+
+    const sessionId = sessionStorage.getItem("session_id");
+    if (!sessionId) return;
+
+    const url = `${API_URL}/logout`;
+    const formData = new FormData();
+    formData.append("session_id", sessionId);
+
+    navigator.sendBeacon(url, formData);
+
+    sessionStorage.removeItem("session_id");
 });
 
 // Добавьте это ко всем ссылкам/кнопкам, которые ведут на другие страницы
@@ -977,46 +1032,7 @@ if (sessionStorage.getItem("refresh")) {
     sessionStorage.removeItem("refresh");
 }
 
-// отслеживаем F5 / Ctrl+R
-window.addEventListener("keydown", function (event) {
 
-    if (event.key === "F5" || (event.ctrlKey && event.key === "r")) {
-        isClosingTab = true;
-        sessionStorage.setItem("refresh", "true");
-    }
-
-});
-
-// переход по ссылкам
-document.addEventListener("click", function (event) {
-
-    const link = event.target.closest("a");
-
-    if (link) {
-        isClosingTab = true;
-    }
-
-});
-
-// основной обработчик закрытия страницы
-window.addEventListener("beforeunload", function () {
-
-    // если это обновление страницы — ничего не делаем
-    if (isClosingTab || sessionStorage.getItem("refresh")) {
-        return;
-    }
-
-    // если вкладку закрывают
-    if (sessionId) {
-
-        navigator.sendBeacon(
-            `${API_URL}/logout`,
-            JSON.stringify({ session_id: sessionId })
-        );
-
-    }
-
-});
 
 // operator.html
 
@@ -1105,6 +1121,7 @@ async function cancelCurrent() {
             const currentElement = document.getElementById("current");
             if (currentElement) {
                 currentElement.textContent = "Окно свободно";
+				document.getElementById("current-service").textContent = "";
             }
             
             // Сбрасываем ID текущего билета, так как его больше нет
@@ -1121,6 +1138,7 @@ async function cancelCurrent() {
             if (res.status === 404 || data.detail === "Нет активного билета для отмены") {
                 currentTicketId = null;
                 document.getElementById("current").textContent = "Окно свободно";
+				document.getElementById("current-service").textContent = "";
             }
         }
     } catch (e) {
@@ -1200,6 +1218,7 @@ function runAutoCallLogic() {
 
         const currentText = currentElement.textContent;
         const isFree = currentText.includes("Окно свободно") || currentText === "--";
+		//document.getElementById("current-service").textContent = "";
         const isOnline = startBtn.classList.contains("status-active");
         
         if (isOnline && isFree) {
