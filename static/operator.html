@@ -201,6 +201,13 @@ button.danger:hover {
     flex-wrap: wrap; /* ВАЖНО — кнопки можно добавлять */
 }
 
+.secondary-actions {
+    display: flex;
+    gap: 15px;
+    padding: 10px 40px 20px 40px;
+    flex-wrap: wrap; /* ВАЖНО — кнопки можно добавлять */
+}
+
 /* ===== Рабочая зона ===== */
 .workspace {
     display: flex;
@@ -232,7 +239,17 @@ button.danger:hover {
     border-radius: 10px;
     box-shadow: 0 3px 10px rgba(0,0,0,0.08);
 }
+
+
+button.recall-btn {
+    background: #29c242;
+    color: white;
 }
+
+button.recall-btn:hover {
+    background: #1ab824;
+}
+
 </style>
 </head>
 
@@ -254,12 +271,23 @@ button.danger:hover {
 
 </div>
 
-<!-- ===== Вторая строка кнопок ===== -->
 <div class="action-row">
-    <button class="primary" onclick="callNext()">Следующий клиент</button>
+    <button class="primary" onclick="callNext()">Вызвать клиента</button>
     <button class="danger" onclick="finishCurrent()">Завершить</button>
     <button onclick="showRedirect()">Перенаправить</button>
+    
+
 </div>
+
+<div class="secondary-actions">
+    <button id="recall-btn" class="recall-btn" onclick="recallCurrent()">
+        Голосовое оповещение
+    </button>
+    <button id="cancel-btn" class="recall-btn" onclick="cancelCurrent()" style="background-color: #e74c3c; margin-top: 10px;">
+        Не подошел
+    </button>
+</div>
+
 
 <!-- ===== Основная рабочая зона ===== -->
 <div class="workspace">
@@ -577,7 +605,7 @@ async function changeWindowStatus(newStatus) {
         }
 
         // 1. Получаем данные о текущем операторе и его окне одним запросом
-        const resDetails = await fetch(`${API_URL}/operator/details`, {
+        const resDetails = await fetch(`${API_URL}/operators/details`, {
             headers: { "session-id": sessionId }
         });
 
@@ -757,6 +785,143 @@ window.addEventListener("beforeunload", function () {
     }
 
 });
+
+// operator.html
+
+let recallCooldown = false;
+const RECALL_CD_TIME = 10000; // 10 секунд ограничения
+
+async function recallCurrent() {
+    if (recallCooldown) return;
+
+    try {
+        const res = await fetch(`${API_URL}/tickets/recall`, {
+            method: "POST",
+            headers: { "session-id": sessionId }
+        });
+
+        if (res.ok) {
+            startRecallTimer();
+        } else {
+            const err = await res.json();
+            alert(err.detail || "Ошибка вызова");
+        }
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+function startRecallTimer() {
+    const btn = document.getElementById("recall-btn");
+    recallCooldown = true;
+    btn.disabled = true;
+    
+    let secondsLeft = RECALL_CD_TIME / 1000;
+    const originalText = "Голосовое оповещение";
+    
+    const interval = setInterval(() => {
+        secondsLeft--;
+        btn.textContent = `Повтор через ${secondsLeft}с`;
+        if (secondsLeft <= 0) {
+            clearInterval(interval);
+            recallCooldown = false;
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+    }, 1000);
+}
+
+
+let cancelCooldown = false;
+const CANCEL_CD_TIME = 60000; // 60 секунд
+
+async function cancelCurrent() {
+    // 1. Проверка: не идет ли уже отсчет таймера
+    if (cancelCooldown) return;
+
+    // 2. ПРОВЕРКА: есть ли вообще кого отменять?
+    // В вашем коде переменная currentTicketId обновляется при вызове и загрузке билета
+    if (!currentTicketId) {
+        alert("Нет активного клиента для отмены.");
+        return;
+    }
+
+    if (!confirm("Отменить билет? Клиент будет помечен как неявившийся.")) return;
+
+    try {
+        const res = await fetch(`${API_URL}/tickets/cancel`, {
+            method: "POST",
+            headers: {
+                "session-id": sessionId 
+            }
+        });
+
+        let data = {};
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+            data = await res.json();
+        }
+
+        if (res.ok) {
+            // Запускаем таймер только если отмена прошла успешно
+            startCancelTimer();
+
+            const msg = data.ticket_number ? `Билет ${data.ticket_number} отменен` : "Билет успешно отменен";
+            alert(msg);
+
+            const currentElement = document.getElementById("current");
+            if (currentElement) {
+                currentElement.textContent = "Окно свободно";
+            }
+            
+            // Сбрасываем ID текущего билета, так как его больше нет
+            currentTicketId = null; 
+            
+            loadQueue(); 
+            if (typeof updateStatus === "function") updateStatus(); 
+            
+        } else {
+            // Если сервер вернул ошибку (например, "Нет активного билета" на стороне бэкенда)
+            alert(data.detail || `Ошибка сервера: ${res.status}`);
+            
+            // Если сервер говорит, что билета нет — синхронизируем клиент
+            if (res.status === 404 || data.detail === "Нет активного билета для отмены") {
+                currentTicketId = null;
+                document.getElementById("current").textContent = "Окно свободно";
+            }
+        }
+    } catch (e) {
+        console.error("Критическая ошибка в cancelCurrent:", e);
+        alert("Произошла ошибка при выполнении запроса.");
+    }
+}
+
+function startCancelTimer() {
+    const btn = document.getElementById("cancel-btn");
+    if (!btn) return; // Проверка на случай если ID кнопки другой
+
+    cancelCooldown = true;
+    btn.disabled = true;
+    btn.style.opacity = "0.6";
+    
+    let secondsLeft = CANCEL_CD_TIME / 1000;
+    const originalText = "Не подошел";
+    
+    const interval = setInterval(() => {
+        secondsLeft--;
+        btn.textContent = `Доступно через ${secondsLeft}с`;
+        
+        if (secondsLeft <= 0) {
+            clearInterval(interval);
+            cancelCooldown = false;
+            btn.disabled = false;
+            btn.style.opacity = "1";
+            btn.textContent = originalText;
+        }
+    }, 1000);
+}
+
+startCancelTimer();
 
 </script>
 

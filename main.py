@@ -446,12 +446,53 @@ async def call_next_ticket(operator: Operator = Depends(verify_session)):
     ticket.window_id = operator.window_id
     ticket.called_at = text("CURRENT_TIMESTAMP")
 
+    await manager.broadcast({
+        "type": "queue_updated"
+    })    
+
     db.commit()
     db.refresh(ticket)
     asyncio.create_task(broadcast_board())
     db.close()
 
     return ticket
+    
+@app.post("/tickets/cancel", tags=["Tickets"])
+async def cancel_current_ticket(operator: Operator = Depends(verify_session)):
+    db = SessionLocal()
+
+    if not operator.window_id:
+        db.close()
+        return {"detail": "Оператору не назначено окно"}
+
+    # Ищем текущий вызванный билет в этом окне
+    ticket = db.query(Ticket).filter(
+        Ticket.window_id == operator.window_id,
+        Ticket.status == "called"
+    ).first()
+
+    if not ticket:
+        db.close()
+        return {"detail": "Нет активного билета для отмены (клиент не вызван)"}
+
+    # Устанавливаем статус отмены и время завершения
+    ticket.status = "cancelled"
+    ticket.finished_at = text("CURRENT_TIMESTAMP")
+
+    # Уведомляем систему об изменениях в очереди
+    await manager.broadcast({
+        "type": "queue_updated"
+    })    
+
+    db.commit()
+    db.refresh(ticket)
+    
+    # Обновляем табло (чтобы номер исчез из списка вызванных)
+    asyncio.create_task(broadcast_board())
+    
+    db.close()
+
+    return {"status": "cancelled", "ticket_number": ticket.number}
 
 @app.get("/tickets/my-queue", tags=["Tickets"])
 def get_my_queue(operator: Operator = Depends(verify_session)):
@@ -552,6 +593,31 @@ def list_tickets():
     tickets = db.query(Ticket).all()
     db.close()
     return tickets
+    
+@app.post("/tickets/recall", tags=["Tickets"])
+async def recall_ticket(operator: Operator = Depends(verify_session)):
+    db = SessionLocal()
+    try:
+        # Ищем текущий активный тикет в этом окне
+        ticket = db.query(Ticket).filter(
+            Ticket.window_id == operator.window_id,
+            Ticket.status == "called"
+        ).first()
+
+        if not ticket:
+            raise HTTPException(status_code=404, detail="Нет активного клиента для повторного вызова")
+
+        # Отправляем широковещательное сообщение через существующий broadcast_board
+        # или напрямую через manager, чтобы табло среагировало
+        await manager.broadcast({
+            "type": "recall_ticket",
+            "ticket_number": ticket.number,
+            "window_name": db.query(Window).filter(Window.id == operator.window_id).first().name
+        })
+        
+        return {"status": "success", "message": f"Повторный вызов клиента {ticket.number}"}
+    finally:
+        db.close()
 
 @app.post("/operators/", tags=["Operators"])
 def create_operator(operator: OperatorCreate, admin: Admin = Depends(verify_admin_session)):
