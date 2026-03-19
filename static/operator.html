@@ -5,312 +5,473 @@
 <title>Окно сотрудника</title>
 
 <style>
+h3 {
+    color: var(--primary);       /* Заголовки теперь синие */
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding-bottom: 8px;
+}
+
+:root {
+    --primary: #003366;          /* Глубокий синий (логотип/шапка) */
+    --primary-hover: #004080;
+    --accent: #00aaff;           /* Голубой акцентный */    
+    --success: #28a745;          /* Зеленый */
+    --danger: #dc3545;           /* Красный */
+    --warning: #ffc107;          /* Желтый */
+    --bg: #f4f7f9;               /* Светло-серый фон страницы */
+    --card-bg: #ffffff;
+    --text-main: #002244;        /* Очень темно-синий для текста */
+    --text-muted: #6c757d;       /* Серый текст */
+    --shadow: 0 4px 12px rgba(0, 51, 102, 0.08);
+}
+
 body {
-    font-family: "Segoe UI", Arial, sans-serif;
     margin: 0;
-    background: #f2f2f2;
-    color: #333;
-}
-
-/* ===== Верхний заголовок ===== */
-h1 {
-    text-align: center;
-    margin: 20px 0;
-    font-weight: 600;
-}
-
-/* ===== Общий контейнер ===== */
-.main-container {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background-color: var(--bg);
+    color: var(--text-main);
     display: flex;
-    justify-content: center;
-    align-items: flex-start;
-    gap: 40px;
-    margin-top: 20px;
+    flex-direction: column;
+    height: 100vh;
 }
 
-/* ===== Левая панель (очередь) ===== */
-#queue-panel {
-    width: 260px;
-    background: white;
-    border-radius: 10px;
-    box-shadow: 0 3px 10px rgba(0,0,0,0.08);
-    overflow: hidden;
-}
-
-#queue-panel h3 {
-    margin: 0;
-    padding: 15px;
-    background: white;
-    border-bottom: 1px solid #eee;
-}
-
-#queue-list {
-    max-height: calc(100vh - 320px);
-    overflow-y: auto;
-    padding: 15px;
-}
-
-
-#queue-panel::-webkit-scrollbar-thumb {
-    position: sticky;
-    background: #cfcfcf;
-    border-radius: 4px;
-}
-
-#queue-panel::-webkit-scrollbar-thumb:hover {
-    position: sticky;
-    background: #b5b5b5;
-}
-
-
-
-.queue-item {
-    padding: 10px;
-    margin-bottom: 8px;
-    background: #f7f7f7;
-    border-radius: 6px;
-    font-weight: 600;
-}
-
-/* ===== Центральная часть ===== */
-.center-panel {
-    text-align: center;
-}
-
-#current {
-    margin: 20px 0;
-    font-size: 36px;
-    font-weight: 600;
-}
-
-/* ===== Кнопки ===== */
-button {
-    padding: 12px 25px;
-    font-size: 16px;
-    margin: 10px;
-    cursor: pointer;
-    border: none;
-    border-radius: 8px;
-    background: #e0e0e0;
-    transition: 0.2s ease;
-}
-
-button:hover {
-    background: #d5d5d5;
-}
-
-button.primary {
-    background: #2d89ef;
-    color: white;
-}
-
-button.primary:hover {
-    background: #1b6fd8;
-}
-
-button.danger {
-    background: #d9534f;
-    color: white;
-}
-
-button.danger:hover {
-    background: #c9302c;
-}
-
-/* ===== Правая панель (оператор) ===== */
-#operator-info {
-    width: 280px;
-    background: white;
-    padding: 20px;
-    border-radius: 10px;
-    box-shadow: 0 3px 10px rgba(0,0,0,0.08);
-    font-size: 15px;
-}
-
-#operator-info b {
-    display: inline-block;
-    width: 140px;
-}
-
-.status-btn {
-    padding: 8px 18px;
-    font-size: 14px;
-    border-radius: 6px;
-    border: none;
-    cursor: pointer;
-    margin-right: 8px;
-    font-weight: 600;
-    transition: 0.2s ease;
-}
-
-//* Старт (например, поменяем на синий) */
-.start {
-    background: #3498db; /* Новый цвет фона */
-    color: white;
-}
-
-.start:hover {
-    background: #29b97b; /* Новый цвет при наведении */
-}
-
-/* Стоп (например, поменяем на серый/оранжевый) */
-.stop {
-    background: #f39c12; /* Новый цвет фона */
-    color: white;
-}
-
-.stop:hover {
-    background: #e67e22; /* Новый цвет при наведении */
-}
-
-/* активная кнопка */
-.status-active {
-    box-shadow: 0 0 0 3px rgba(0,0,0,0.3) inset; /* Толщина и прозрачность рамки */
-    filter: brightness(85%); /* Чуть затемняем активную кнопку */
-    transform: scale(0.95);    /* Немного уменьшаем её при нажатии */
-}
-
-/* ===== Строка 1 (статус) ===== */
-.top-row {
+/* Верхняя панель управления */
+.header-panel {
+    background: var(--card-bg);
+    padding: 1rem 2rem;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 20px 40px 10px 40px;
+    box-shadow: var(--shadow);
+    z-index: 10;
 }
 
-.status-buttons {
+.button-group {
     display: flex;
-    gap: 15px;
+    gap: 12px;
 }
 
-/* Добавьте это к вашим стилям .start и .stop */
-.logout {
-    background: #963930; /* Ваш исходный серый цвет */
-    color: white;
-}
-
-.logout:hover {
-    background: #661911; /* Чуть темнее при наведении для интерактивности */
-}
-
-/* ===== Строка 2 (действия) ===== */
-.action-row {
-    display: flex;
-    gap: 15px;
-    padding: 10px 40px 20px 40px;
-    flex-wrap: wrap; /* ВАЖНО — кнопки можно добавлять */
-}
-
-.secondary-actions {
-    display: flex;
-    gap: 15px;
-    padding: 10px 40px 20px 40px;
-    flex-wrap: wrap; /* ВАЖНО — кнопки можно добавлять */
-}
-
-/* ===== Рабочая зона ===== */
-.workspace {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    padding: 20px 40px;
-}
-
-/* Центр */
-.center-panel {
+/* Основной контейнер */
+.main-layout {
+    display: grid;
+    /* Бока по 1 части, центр — 2 части от свободного пространства */
+    grid-template-columns: 1fr 3fr 1fr; 
+    gap: 20px;
+    padding: 20px;
     flex: 1;
+    width: 100%;
+    max-width: 100%; /* Занимать весь экран по ширине */
+    margin: 0 auto;
+    box-sizing: border-box;
+}
+
+/* Карточки */
+.glass-card {
+    background: var(--card-bg);
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    max-height: 100%; /* Карточка не должна быть выше родительской сетки */
+    overflow: hidden; /* Чтобы скроллилась только очередь, а не вся карточка */
+}
+
+/* Центральная зона с номером */
+.display-zone {
+    padding: 40px 20px;
+    min-width: 400px;
+    display: flex; /* Добавлено */
+    flex-direction: column; /* Добавлено */
+    align-items: center; /* Центрирование по горизонтали */
+    justify-content: center; /* Центрирование по вертикали */
+    text-align: center; /* Центрирование текста */
+}
+
+.ticket-label {
+    font-size: 1.2rem;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+}
+
+.ticket-number {
+    font-size: 7rem; /* Увеличили обратно, но уберем лишний текст в JS */
+    font-weight: 800;
+    color: var(--primary);
+    line-height: 1;
+    margin: 10px 0 30px 0;
+    letter-spacing: -2px;
+}}
+
+.services-list {
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.service-tag {
+    background: transparent; /* Убираем фон */
+    color: var(--text-muted) !important;
+    font-size: 1.1rem; /* Сделали чуть крупнее по вашей просьбе */
+    padding: 2px 0; /* Отступы только сверху и снизу */
+    border: none; /* Убираем обводку */
+    display: block; /* Каждая услуга с новой строки для чистоты */
+}
+
+/* Очередь */
+.queue-list {
+    /* Фиксируем высоту: высота экрана минус шапка, отступы и заголовок */
+    height: calc(100vh - 200px); 
+    overflow-y: auto;
+    margin-top: 15px;
+    padding-right: 10px; /* Отступ для скроллбара */
+}
+
+/* Сделаем скроллбар более аккуратным в стиле вуза */
+.queue-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.queue-list::-webkit-scrollbar-track {
+    background: #f1f5f9;
+    border-radius: 10px;
+}
+
+.queue-list::-webkit-scrollbar-thumb {
+    background: var(--text-muted);
+    border-radius: 10px;
+}
+
+.queue-list::-webkit-scrollbar-thumb:hover {
+    background: var(--primary);
+}
+
+.queue-service-name {
+    /* Удалены white-space: nowrap и ellipsis */
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    line-height: 1.2;
+    font-size: 0.85rem;
+    font-weight: 400;
+    color: var(--text-muted);
+    margin-top: 6px;
+    
+    /* Убираем ограничение ширины или делаем его больше, 
+       чтобы текст мог занимать всю ширину карточки */
+    width: 100%; 
+    display: block; 
+}
+
+.queue-item {
+    display: flex;
+    flex-direction: column; /* Номер сверху, услуга снизу */
+    align-items: flex-start; /* Прижимаем текст к левому краю */
+    border-bottom: 1px solid #eee;
+    min-height: 70px; /* Немного увеличим для комфорта */
+    background: #f1f5f9;
+    margin-bottom: 12px;
+    padding: 15px 20px;
+    border-radius: 12px;
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--text-main); /* Сделаем номер чуть контрастнее */
+}
+
+#queue-panel {
+    max-height: 500px; /* Можно чуть увеличить */
+    overflow-y: auto;
+    padding-right: 5px; /* Отступ для скроллбара */
+}
+
+/* Кнопки */
+button {
+    border: none;
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 0.9rem;
+}
+
+.btn-primary { background: var(--primary); color: white; }
+.btn-primary:hover { background: var(--primary-hover); }
+
+.btn-success { background: var(--success); color: white; }
+.btn-danger { background: var(--danger); color: white; }
+
+.btn-success.status-active {
+    background-color: var(--success) !important;
+    box-shadow: 0 0 10px rgba(46, 196, 182, 0.5);
+}
+
+.btn-warning-active {
+    background-color: var(--warning) !important;
+    color: white !important;
+    border-color: var(--warning) !important;
+}
+
+.info-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap; /* Чтобы текст не переносился */
+}
+
+.btn-outline {
+    background: transparent;
+    border: 2px solid #e2e8f0;
+    color: var(--text-main);
+}
+
+.btn-outline:hover { background: #f1f5f9; }
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Статус-бар */
+.status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    background: #e2e8f0;
+    font-size: 0.85rem;
+}
+
+.dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: #8d99ae; /* Серый по умолчанию */
+    transition: all 0.3s ease;
+}
+
+.dot.online {
+    background-color: var(--success) !important;
+    box-shadow: 0 0 8px var(--success);
+}
+
+/* Контейнер всей группы (переключатель + текст) */
+.auto-call-group {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 0 25px;         /* Отступы слева и справа от кнопок ОНЛАЙН/ПЕРЕРЫВ */
+    padding: 5px 0;
+    min-width: 250px;       /* Фиксированная ширина, чтобы верстка не дергалась при смене текста */
+}
+
+/* Сама плашка с переключателем */
+.auto-call-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 18px;
+    background: #edf2f7;    /* Светлый фон, выделяющий блок */
+    border-radius: 12px;
+    border: 1px solid #cbd5e0;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+/* Надпись "Автовызов" */
+.auto-call-label {
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: var(--primary);  /* Используем ваш темно-синий цвет */
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Главный текст: "Следующий клиент через..." */
+.auto-call-status-text {
+    font-size: 1.25rem;      /* Крупный текст */
+    font-weight: 700;
+    color: var(--success);   /* Зеленый цвет для активного ожидания */
+    min-height: 1.6rem;
+    transition: all 0.3s ease;
+}
+
+/* Стили для увеличенного переключателя (Toggle) */
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 48px;
+    height: 24px;
+}
+
+.switch input { display: none; }
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: #cbd5e0;
+    transition: .4s;
+    border-radius: 24px;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+}
+
+input:checked + .slider {
+    background-color: var(--success);
+}
+
+input:checked + .slider:before {
+    transform: translateX(24px);
+}
+
+/* Анимация мигания для текста отсчета (по желанию) */
+@keyframes pulse-text {
+    0% { opacity: 1; }
+    50% { opacity: 0.7; }
+    100% { opacity: 1; }
+}
+
+.auto-call-status-text:not(:empty) {
+    animation: pulse-text 2s infinite;
+}
+
+
+/* Контейнер, в котором лежат все ваши кнопки и автовызов */
+.sidebar, .controls-column {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;          /* Растягиваем на всю высоту экрана */
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+/* Специальный оберточный класс для низа */
+.bottom-controls {
+    margin-top: auto;       /* МАГИЯ: толкает этот блок максимально вниз */
+    padding-top: 20px;      /* Отступ от кнопок выше */
+    border-top: 1px solid #e2e8f0; /* Визуальный разделитель (по желанию) */
+    width: 100%;
+}
+
+/* Стили самого автовызова (обновленные) */
+.auto-call-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;    /* Центрируем, если внизу */
+    gap: 10px;
+}
+
+.auto-call-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    background: #ffffff;
+    border-radius: 12px;
+    border: 2px solid #edf2f7;
+    box-shadow: 0 -4px 12px rgba(0,0,0,0.05); /* Тень вверх */
+}
+
+.auto-call-status-text {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--success);
     text-align: center;
 }
-
-/* Левая панель */
-#queue-panel {
-    width: 260px;
-    background: white;
-    padding: 20px;
-    border-radius: 10px;
-    box-shadow: 0 3px 10px rgba(0,0,0,0.08);
-}
-
-/* Правая панель */
-#operator-info {
-    width: 280px;
-    background: white;
-    padding: 20px;
-    border-radius: 10px;
-    box-shadow: 0 3px 10px rgba(0,0,0,0.08);
-}
-
-
-button.recall-btn {
-    background: #29c242;
-    color: white;
-}
-
-button.recall-btn:hover {
-    background: #1ab824;
-}
-
 </style>
 </head>
 
 <body>
-<!-- ===== Первая строка кнопок ===== -->
-<div class="top-row">
-
-    <div class="status-buttons">
-        <button id="btn-start" class="status-btn start" onclick="changeWindowStatus('online')">
-            НАЧАТЬ
-        </button>
-
-        <button id="btn-stop" class="status-btn stop" onclick="changeWindowStatus('break')">
-            ПЕРЕРЫВ
-        </button>
-    </div>
-
-    <button class="status-btn logout" onclick="logout()">ВЫЙТИ</button>
-
+<div id="toast-notification" style="display:none; position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: var(--danger); color: white; padding: 15px 30px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); z-index: 1000; font-weight: 600;">
+    Закончите с текущим клиентом!
 </div>
 
-<div class="action-row">
-    <button class="primary" onclick="callNext()">Вызвать клиента</button>
-    <button class="danger" onclick="finishCurrent()">Завершить</button>
-    <button onclick="showRedirect()">Перенаправить</button>
+<header class="header-panel">
+    <div class="button-group">
+        <button id="btn-start" class="btn-success" onclick="changeWindowStatus('online')">ОНЛАЙН</button>
+        <button id="btn-stop" class="btn-outline" onclick="changeWindowStatus('break')">ПЕРЕРЫВ</button>
+		
+		<div id="status-info-block" class="info-status" style="margin: 0; padding: 6px 14px; background: #f1f5f9; border-radius: 20px; font-size: 0.95rem;">
+			<div id="status-dot" class="dot"></div>
+			<span id="status-text" style="font-weight: 700;">Загрузка...</span>
+		</div>
+
+    </div>
     
+    <div class="button-group">
+        <button class="btn-outline" onclick="logout()">ВЫЙТИ</button>
+    </div>
+</header>
 
-</div>
+<main class="main-layout">
+    <section class="glass-card">
+        <h3 style="margin-top:0">Очередь</h3>
+        <div id="queue-list" class="queue-list">Загрузка...</div>
+    </section>
 
-<div class="secondary-actions">
-    <button id="recall-btn" class="recall-btn" onclick="recallCurrent()">
-        Голосовое оповещение
-    </button>
-    <button id="cancel-btn" class="recall-btn" onclick="cancelCurrent()" style="background-color: #e74c3c; margin-top: 10px;">
-        Не подошел
-    </button>
-</div>
-
-
-<!-- ===== Основная рабочая зона ===== -->
-<div class="workspace">
-
-	<div id="queue-panel">
-		<h3>Очередь</h3>
-		<div id="queue-list">Загрузка...</div>
-	</div>
-
-    <div class="center-panel">
-        <div id="current">Окно свободно</div>
-
-        <div id="redirect-panel" style="display:none; margin-top:10px;">
-            <select id="redirect-service"></select>
-            <button onclick="confirmRedirect()">Подтвердить</button>
+    <section class="glass-card display-zone">
+        <div class="ticket-label">ТЕКУЩИЙ КЛИЕНТ</div>
+        <div id="current" class="ticket-number">--</div>
+        
+		
+        <div class="button-group" style="margin-top: 40px; justify-content: center;">
+            <button id="next-btn" class="btn-primary" onclick="callNext()" style="padding: 20px 40px; font-size: 1.1rem;">ВЫЗВАТЬ СЛЕДУЮЩЕГО</button>
+            <button class="btn-danger" onclick="finishCurrent()">ЗАВЕРШИТЬ ОБСЛУЖИВАНИЕ</button>
         </div>
-    </div>
 
-    <div id="operator-info">
-        Загрузка информации...
-    </div>
+        <div class="button-group" style="margin-top: 15px; justify-content: center;">
+            <button class="btn-outline" id="recall-btn" onclick="recallCurrent()">ПОВТОРИТЬ ВЫЗОВ</button>
+            <button class="btn-outline" id="cancel-btn" onclick="cancelCurrent()">НЕ ПОДОШЕЛ</button>
+            <button class="btn-outline" onclick="showRedirect()">ПЕРЕНАПРАВИТЬ</button>
+        </div>
 
-</div>
+        <div id="redirect-panel" style="display:none; margin-top:20px; background: #f8f9fc; padding: 15px; border-radius: 12px;">
+            <select id="redirect-service" style="padding: 8px; border-radius: 6px; border: 1px solid #ddd;"></select>
+            <button class="btn-primary" onclick="confirmRedirect()">ОК</button>
+        </div>
+		
+		<div class="bottom-controls">
+			<div class="auto-call-group">
+				<div class="auto-call-container">
+					<label class="switch">
+						<input type="checkbox" id="auto-call-toggle">
+						<span class="slider round"></span>
+					</label>
+					<span class="auto-call-label">Автовызов</span>
+				</div>
+				<div id="auto-call-status" class="auto-call-status-text"></div>
+			</div>
+		</div>
+
+    </section>
+
+
+
+
+	<section class="glass-card">
+		<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; height: 32px;">
+			<h3 style="margin: 0; padding: 0; line-height: 1;">Информация</h3>
+			
+
+		</div>
+
+		<div id="operator-info" style="line-height: 1.6;"></div>
+	</section>
+</main>
 </div>
 
 <script>
@@ -405,29 +566,36 @@ async function loadOperatorInfo() {
             headers: { "session-id": sessionId }
         });
 
-        if (!res.ok) {
-            throw new Error("Не удалось загрузить данные профиля");
-        }
-
+        if (!res.ok) throw new Error("Ошибка загрузки");
         const data = await res.json();
 
-        // Обновляем UI
+        const servicesHtml = data.services && data.services.length > 0 
+            ? data.services.map(s => `<span class="service-tag">${s}</span>`).join("")
+            : '<span style="color: var(--text-muted)">Услуги не назначены</span>';
+
+        // Метки: ЧЕРНЫЕ (font-weight 800), Данные: СЕРЫЕ (font-weight 600)
         document.getElementById("operator-info").innerHTML = `
-            <b>Оператор:</b> ${data.operator_name} <br>
-            <b>Окно:</b> ${data.window_name} <br>
-            <b>Статус:</b> ${data.window_status}<br>
-            <b>Оказываемые услуги:</b><br> ${data.services.length > 0 ? data.services.join("<br>") : "Услуги не назначены"}
+            <div style="margin-bottom: 25px;">
+                <span style="color: var(--text-main); font-size: 1.1rem; text-transform: uppercase; font-weight: 800; letter-spacing: 0.5px;">Оператор</span><br>
+                <span style="font-size: 1.4rem; font-weight: 400; color: var(--text-muted); line-height: 1.8;">${data.operator_name}</span>
+            </div>
+            <div style="margin-bottom: 25px;">
+                <span style="color: var(--text-main); font-size: 1.1rem; text-transform: uppercase; font-weight: 800; letter-spacing: 0.5px;">Окно</span><br>
+                <span style="font-size: 1.6rem; font-weight: 400; color: var(--text-muted); line-height: 1.8;">${data.window_name}</span>
+            </div>
+            <div>
+                <span style="color: var(--text-main); font-size: 1.1rem; text-transform: uppercase; font-weight: 800; letter-spacing: 0.5px; display: block; margin-bottom: 12px;">Оказываемые услуги</span>
+                <div class="services-list" style="gap: 10px; font-weight: 400;">${servicesHtml}</div>
+            </div>
         `;
 
-        // Синхронизируем кнопки статуса (online/break) с реальным состоянием из БД
         updateStatusButtons(data.window_status);
 
     } catch (e) {
         console.error(e);
-        document.getElementById("operator-info").textContent = "Ошибка загрузки данных профиля";
+        document.getElementById("operator-info").innerHTML = "<span style='font-size:1.2rem;'>Ошибка загрузки профиля</span>";
     }
 }
-
 
 
 /* =========================
@@ -440,20 +608,22 @@ async function loadQueue() {
         });
 
         const tickets = await res.json();
-
         const panel = document.getElementById("queue-list");
 
         if (!tickets.length) {
-            panel.innerHTML = "Нет ожидающих";
+            panel.innerHTML = "<div style='color:var(--text-muted); padding:20px;'>Нет ожидающих</div>";
             return;
         }
 
-        panel.innerHTML = tickets.map(t =>
-            `<div class="queue-item">№ ${t.number}</div>`
-        ).join("");
+        panel.innerHTML = tickets.map(t => `
+            <div class="queue-item">
+                <div>№ ${t.number}</div>
+                <div class="queue-service-name">${t.service_name || 'Услуга не указана'}</div>
+            </div>
+        `).join("");
 
     } catch (e) {
-        console.error(e);
+        console.error("Ошибка загрузки очереди:", e);
     }
 }
 
@@ -461,35 +631,68 @@ async function loadQueue() {
    Вызов следующего клиента
 ========================= */
 async function callNext() {
-	const stopBtn = document.getElementById("btn-stop");
-    const isBreak = stopBtn.classList.contains("status-active");
+    // 1. Проверка на активного клиента (самый приоритетный блок)
+    if (currentTicketId !== null && currentTicketId !== undefined) {
+        showToast("Закончите с текущим клиентом!", "danger");
+        return;
+    }
 
-    // 2. Если статус 'break', меняем его на 'online' перед вызовом
+    const stopBtn = document.getElementById("btn-stop");
+    const isBreak = stopBtn.classList.contains("btn-warning-active");
+
     if (isBreak) {
         await changeWindowStatus('online');
     }
 	
-	const res = await fetch(`${API_URL}/tickets/next`, {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-			"session-id": sessionId
-		}
-	});
+    try {
+        const res = await fetch(`${API_URL}/tickets/next`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "session-id": sessionId
+            }
+        });
 
-    const ticket = await res.json();
+        const ticket = await res.json();
 
-    if (ticket.detail) {
-        document.getElementById("current").textContent = ticket.detail;
-        currentTicketId = null;
-    } else {
-        document.getElementById("current").textContent =
-            "Текущий клиент: " + ticket.number;
-
-        currentTicketId = ticket.id;
+        if (res.ok && ticket.id) {
+            document.getElementById("current").textContent = ticket.number;
+            currentTicketId = ticket.id;
+            // Скрываем тост, если он висел
+            document.getElementById("toast-notification").style.display = "none";
+        } else {
+            // Если в очереди никого нет - показываем ЖЕЛТЫМ или серым, а не красным
+            showToast(ticket.detail || "В очереди никого нет", "warning");
+        }
+    } catch (e) {
+        console.error(e);
+        showToast("Ошибка соединения с сервером", "danger");
     }
 
     loadQueue();
+	startCancelTimer();
+}
+
+// Улучшенная функция уведомлений с поддержкой разных цветов
+function showToast(message, type = "danger") {
+    const toast = document.getElementById("toast-notification");
+    toast.textContent = message;
+    
+    // Меняем цвет в зависимости от ситуации
+    if (type === "warning") {
+        toast.style.background = "var(--warning)"; // Оранжевый для "Очередь пуста"
+    } else {
+        toast.style.background = "var(--danger)";  // Красный для ошибок работы
+    }
+    
+    toast.style.display = "block";
+    
+    // Очищаем предыдущий таймер, если он был, чтобы уведомление не мерцало
+    if (window.toastTimer) clearTimeout(window.toastTimer);
+    
+    window.toastTimer = setTimeout(() => {
+        toast.style.display = "none";
+    }, 3000);
 }
 
 /* =========================
@@ -500,18 +703,29 @@ async function finishCurrent() {
         const res = await fetch(`${API_URL}/tickets/finish`, {
             method: "POST",
             headers: {
-					"Content-Type": "application/json",
-					"session-id": sessionId
-				}
+                "Content-Type": "application/json",
+                "session-id": sessionId
+            }
         });
 
         const result = await res.json();
 
-        if (result.detail) {
-            alert(result.detail); // например, "Нет текущего клиента"
+        if (res.ok) {
+            // КРИТИЧЕСКИ ВАЖНО: Сбрасываем ID текущего билета в null
+            currentTicketId = null; 
+            
             document.getElementById("current").textContent = "Окно свободно";
+            // Также скрываем уведомление, если оно висело
+            document.getElementById("toast-notification").style.display = "none";
         } else {
-            document.getElementById("current").textContent = "Окно свободно";
+            // Если сервер вернул ошибку (например, клиент уже был завершен)
+            alert(result.detail || "Ошибка при завершении");
+            
+            // Если билета на сервере уже нет, синхронизируем локальное состояние
+            if (res.status === 404 || res.status === 400) {
+                currentTicketId = null;
+                document.getElementById("current").textContent = "Окно свободно";
+            }
         }
 
         loadQueue(); // обновляем очередь
@@ -663,14 +877,33 @@ async function changeWindowStatus(newStatus) {
 function updateStatusButtons(status) {
     const startBtn = document.getElementById("btn-start");
     const stopBtn = document.getElementById("btn-stop");
+    const statusText = document.getElementById("status-text");
+    const statusDot = document.getElementById("status-dot");
 
-    startBtn.classList.remove("status-active");
-    stopBtn.classList.remove("status-active");
+    // Базовый сброс для всех состояний
+    statusDot.style.boxShadow = "none";
+    statusDot.style.backgroundColor = ""; // Возвращаем к стилям из CSS классов
 
     if (status === "online") {
+        // Кнопки
         startBtn.classList.add("status-active");
+        stopBtn.classList.remove("btn-warning-active");
+        
+        // Индикатор в информации
+        statusDot.className = "dot online"; // Класс .online вернет зеленый цвет
+        statusText.textContent = "В сети";
+        statusText.style.color = "var(--success)";
     } else {
-        stopBtn.classList.add("status-active");
+        // Кнопки
+        startBtn.classList.remove("status-active");
+        stopBtn.classList.add("btn-warning-active");
+        
+        // Индикатор в информации
+        statusDot.className = "dot"; 
+        statusDot.style.backgroundColor = "var(--warning)"; // Принудительно желтый
+        statusDot.style.boxShadow = "0 0 8px var(--warning)";
+        statusText.textContent = "На перерыве";
+        statusText.style.color = "var(--warning)";
     }
 }
 
@@ -686,8 +919,7 @@ async function loadCurrentTicket() {
 
             currentTicketId = data.ticket.id;
 
-            document.getElementById("current").textContent =
-                "Текущий клиент: " + data.ticket.number;
+            document.getElementById("current").textContent = data.ticket.number;
 
         } else {
 
@@ -832,8 +1064,9 @@ function startRecallTimer() {
 }
 
 
+let cancelInterval = null; // Переменная для хранения интервала
 let cancelCooldown = false;
-const CANCEL_CD_TIME = 60000; // 60 секунд
+const CANCEL_CD_TIME = 60000;
 
 async function cancelCurrent() {
     // 1. Проверка: не идет ли уже отсчет таймера
@@ -898,7 +1131,12 @@ async function cancelCurrent() {
 
 function startCancelTimer() {
     const btn = document.getElementById("cancel-btn");
-    if (!btn) return; // Проверка на случай если ID кнопки другой
+    if (!btn) return;
+
+    // КРИТИЧЕСКИЙ МОМЕНТ: очищаем старый интервал перед запуском нового
+    if (cancelInterval) {
+        clearInterval(cancelInterval);
+    }
 
     cancelCooldown = true;
     btn.disabled = true;
@@ -907,12 +1145,14 @@ function startCancelTimer() {
     let secondsLeft = CANCEL_CD_TIME / 1000;
     const originalText = "Не подошел";
     
-    const interval = setInterval(() => {
+    // Сохраняем ID нового интервала
+    cancelInterval = setInterval(() => {
         secondsLeft--;
         btn.textContent = `Доступно через ${secondsLeft}с`;
         
         if (secondsLeft <= 0) {
-            clearInterval(interval);
+            clearInterval(cancelInterval);
+            cancelInterval = null; // Обнуляем ссылку
             cancelCooldown = false;
             btn.disabled = false;
             btn.style.opacity = "1";
@@ -922,6 +1162,102 @@ function startCancelTimer() {
 }
 
 startCancelTimer();
+
+
+// Глобальные переменные (объявляем один раз в самом верху)
+let autoCallTimer = null;
+let secondsLeft = 5;
+
+// Исправленная единая функция остановки
+function stopAutoCall() {
+    if (autoCallTimer) {
+        clearInterval(autoCallTimer);
+        autoCallTimer = null;
+    }
+    secondsLeft = 5;
+    const statusDisplay = document.getElementById("auto-call-status");
+    if (statusDisplay) statusDisplay.textContent = "";
+}
+
+function runAutoCallLogic() {
+    stopAutoCall(); // Чистим всё перед запуском, чтобы не было дублей
+
+    autoCallTimer = setInterval(async () => {
+        const toggle = document.getElementById('auto-call-toggle');
+        const statusDisplay = document.getElementById("auto-call-status");
+        
+        // ПРОВЕРКА №1: Если кнопку выключили, немедленно убиваем цикл
+        if (!toggle || !toggle.checked) {
+            stopAutoCall();
+            return;
+        }
+
+        const nextBtn = document.getElementById("next-btn");
+        const currentElement = document.getElementById("current");
+        const startBtn = document.getElementById("btn-start");
+
+        if (!currentElement || !startBtn) return;
+
+        const currentText = currentElement.textContent;
+        const isFree = currentText.includes("Окно свободно") || currentText === "--";
+        const isOnline = startBtn.classList.contains("status-active");
+        
+        if (isOnline && isFree) {
+            const queueItems = document.querySelectorAll('.queue-item');
+            
+            if (queueItems.length > 0) {
+                if (nextBtn && nextBtn.disabled) {
+                    statusDisplay.textContent = "Ожидание готовности...";
+                    return;
+                }
+
+                statusDisplay.textContent = `Следующий клиент через ${secondsLeft}...`;
+                
+                if (secondsLeft <= 0) {
+                    statusDisplay.textContent = "Вызываю...";
+                    secondsLeft = 5;
+                    await callNext();
+                } else {
+                    secondsLeft--;
+                }
+            } else {
+                statusDisplay.textContent = "Очередь пуста";
+                secondsLeft = 5;
+            }
+        } else if (!isFree) {
+            statusDisplay.textContent = "Клиент в обслуживании";
+            secondsLeft = 5;
+        } else {
+            statusDisplay.textContent = "Автовызов на паузе (Перерыв)";
+        }
+    }, 1000);
+}
+
+// ИНИЦИАЛИЗАЦИЯ (выполнять после объявления функций)
+const autoCallToggle = document.getElementById('auto-call-toggle');
+
+if (autoCallToggle) {
+    const savedStatus = localStorage.getItem('autoCallActive');
+    
+    // Прямая проверка: запускаем только если в базе четко 'true'
+    if (savedStatus === 'true') {
+        autoCallToggle.checked = true;
+        runAutoCallLogic();
+    } else {
+        autoCallToggle.checked = false;
+        stopAutoCall();
+    }
+
+    autoCallToggle.addEventListener('change', function(e) {
+        if (e.target.checked) {
+            localStorage.setItem('autoCallActive', 'true');
+            runAutoCallLogic();
+        } else {
+            localStorage.setItem('autoCallActive', 'false');
+            stopAutoCall();
+        }
+    });
+}
 
 </script>
 

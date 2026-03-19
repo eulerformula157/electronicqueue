@@ -512,17 +512,23 @@ def get_my_queue(operator: Operator = Depends(verify_session)):
         db.close()
         return []
 
-    # Берём тикеты в статусе "waiting", относящиеся к услугам окна
     tickets = db.query(Ticket)\
-        .filter(
-            Ticket.status == "waiting",
-            Ticket.service_id.in_(service_ids)
-        )\
+        .filter(Ticket.status == "waiting", Ticket.service_id.in_(service_ids))\
         .order_by(Ticket.created_at)\
         .all()
 
+    # Формируем ответ вручную, добавляя имя услуги
+    result = []
+    for t in tickets:
+        result.append({
+            "id": t.id,
+            "number": t.number,
+            "service_id": t.service_id,
+            "service_name": t.service.name if t.service else "Неизвестно"
+        })
+    
     db.close()
-    return tickets
+    return result
 
 @app.post("/tickets/redirect", tags=["Tickets"])
 async def redirect_ticket(data: RedirectRequest):
