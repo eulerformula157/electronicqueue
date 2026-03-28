@@ -19,13 +19,14 @@ from sqlalchemy import text
 import asyncio
 import secrets
 
-DATABASE_URL = "postgresql://postgres:password@localhost:5432/postgres"
+DATABASE_URL = "postgresql://postgres:password@localhost:5432/postgres" # поменять пароль и адрес при развертывании
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
 
 app = FastAPI()
+#app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None) - использовать когда закончишь разработку
 
 # для WebSocket
 
@@ -120,21 +121,11 @@ def verify_admin_session(session_id: str = Header(None)):
         raise HTTPException(status_code=403, detail="Администратор не найден")
     return admin
 
-def verify_admin(session_id: str):
-    session = db.get_session(session_id)
-
-    if not session:
-        raise HTTPException(401, "Not authenticated")
-
-    if session.role != "admin":
-        raise HTTPException(403, "Not admin")
-
-    return session
 # Разрешение для CORS
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # доступ смогут получить все пк, находящиеся в подсети (проверить мб такое решение небезопасное)
+    allow_origins=["*"],  # доступ могут получить все пк, находящиеся в подсети (проверить мб такое решение небезопасное)
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -219,6 +210,9 @@ class PriorityUpdate(BaseModel):
     service_id: int
     priority: int
 
+class LoginRequest(BaseModel):
+    login: str
+    password: str
 # ------------------ Pydantic схемы ------------------
 
 class ServiceCreate(BaseModel):
@@ -325,7 +319,7 @@ async def update_service_status(
     service_id: int = Path(..., gt=0),
     data: ServiceStatusUpdate = ...,
     admin: Admin = Depends(verify_admin_session)
-):
+    ):
     db = SessionLocal()
     try:
         service = db.query(Service).filter(Service.id == service_id).first()
@@ -349,46 +343,66 @@ async def update_service_status(
 @app.post("/tickets/", tags=["Tickets"])
 async def create_ticket(ticket: TicketCreate):
     db = SessionLocal()
+    try:
+        # 1. Проверяем существование услуги
+        service = db.query(Service).filter(Service.id == ticket.service_id).first()
+        if not service:
+            raise HTTPException(status_code=404, detail="Услуга не найдена")
 
-    # Получаем услугу
-    service = db.query(Service).filter(Service.id == ticket.service_id).first()
-    if not service:
-        db.close()
-        return {"error": "Service not found"}
-
-    # Получаем окна для услуги
-    windows = (
-        db.query(Window)
-        .join(WindowService, Window.id == WindowService.window_id)
-        .filter(
-            WindowService.service_id == service.id,
-            Window.status == "online"  
+        # 2. Проверяем, есть ли хоть одно работающее окно для этой услуги
+        # (Чтобы не выдавать талон, если комиссия закончила работу)
+        active_windows = (
+            db.query(Window)
+            .join(WindowService, Window.id == WindowService.window_id)
+            .filter(
+                WindowService.service_id == service.id,
+                Window.status == "online"
+            ).first()
         )
-        .distinct()
-        .order_by(Window.id)
-        .all()
-    )
+        
+        if not active_windows:
+            raise HTTPException(status_code=400, detail="В данный момент услуга не оказывается (нет активных окон)")
 
-    if not windows:
+        # 3. Создаем новый тикет
+        # Номер тикета обычно генерируется автоматически (например, А001), 
+        # предполагаю, что у тебя это настроено в модели или БД
+        db_ticket = Ticket(
+            service_id=service.id,
+            status="waiting",
+            created_at=datetime.now() # Важно для корректного подсчета очереди
+        )
+        
+        db.add(db_ticket)
+        db.commit()
+        db.refresh(db_ticket)
+
+        # 4. Считаем сколько людей в очереди ПЕРЕД этим талоном
+        # Считаем только тех, кто в статусе 'waiting' и был создан раньше
+        waiting_before = db.query(Ticket).filter(
+            Ticket.status == "waiting",
+            Ticket.id < db_ticket.id
+        ).count()
+
+        # 5. Уведомляем табло и операторов об обновлении очереди
+        await manager.broadcast({
+            "type": "queue_updated",
+            "service_id": service.id
+        })
+
+        # 6. Формируем расширенный ответ для терминала
+        return {
+            "id": db_ticket.id,
+            "number": db_ticket.number,
+            "service_name": service.name,
+            "waiting_before": waiting_before,
+            "date": datetime.now().strftime("%d.%m.%Y %H:%M")
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
         db.close()
-        return {"error": "No windows available for this service"}
-
-
-    db_ticket = Ticket(
-        service_id=service.id,
-        status="waiting"
-    )
-
-    await manager.broadcast({
-        "type": "queue_updated"
-    })
-
-    db.add(db_ticket)
-    db.commit()
-    db.refresh(db_ticket)
-    db.close()
-
-    return db_ticket
      
 @app.post("/tickets/finish", tags=["Tickets"])
 async def finish_ticket(operator: Operator = Depends(verify_session)):
@@ -799,10 +813,6 @@ def delete_window_service(window_id: int, service_id: int, admin: Admin = Depend
 
     return {"status":"ok"}
 
-class LoginRequest(BaseModel):
-    login: str
-    password: str
-
 @app.post("/login", tags=["Auth"])
 async def login(data: LoginRequest):
     db = SessionLocal()
@@ -874,7 +884,7 @@ async def login(data: LoginRequest):
 async def logout(session_id: str = Header(...)):
     db: Session = SessionLocal()
     try:
-        # --- ЛОГИКА ДЛЯ ОПЕРАТОРОВ (сохранена) ---
+        # --- ЛОГИКА ДЛЯ ОПЕРАТОРОВ ---
         current_session = db.query(UserSession).filter(UserSession.session_id == session_id).first()
         
         if current_session:
@@ -894,7 +904,7 @@ async def logout(session_id: str = Header(...)):
             db.commit()
             return {"status": "success", "role": "operator"}
 
-        # --- НОВАЯ ЛОГИКА ДЛЯ АДМИНИСТРАТОРОВ ---
+        # --- ЛОГИКА ДЛЯ АДМИНИСТРАТОРОВ ---
         admin_session = db.query(AdminSession).filter(AdminSession.session_id == session_id).first()
         
         if admin_session:
@@ -947,12 +957,11 @@ def get_operator_by_session(session_id: str = Header(..., alias="session-id")):
     finally:
         db.close()
 
-
 @app.post("/windows/update-status", tags=["Windows"])
 async def update_window_status(
     data: WindowStatusUpdateOp,
     operator: Operator = Depends(get_operator_by_session)
-):
+    ):
     # проверяем, что оператор меняет своё окно
     if operator.window_id != data.window_id:
         raise HTTPException(

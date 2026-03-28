@@ -1080,7 +1080,7 @@ async function ExitPage() {
     } catch (err) {
         console.error("Ошибка при выходе:", err);
     } finally {
-        // ОБЯЗАТЕЛЬНО: Очищаем данные сессии на клиенте
+        // чищаем данные сессии на клиенте
         sessionStorage.removeItem("session_id");
         location.href = "login.html"; // Перенаправляем на вход
     }

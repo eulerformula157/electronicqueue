@@ -17,7 +17,7 @@ html,body{
 h1{
     text-align:center;
     margin:15px 0;
-    font-size:32px;
+    font-size:30px;
     color:#1a1d23;        /* тёмный заголовок */
 }
 
@@ -33,7 +33,7 @@ h1{
     grid-template-columns:repeat(2, 1fr);
     grid-template-rows:repeat(5, 1fr);
     gap:15px;
-    height:100%;
+    height:95%;
 }
 
 /* Карточка */
@@ -96,6 +96,7 @@ h1{
 <body>
 
 <h1 id="title">Табло очереди Приемной комиссии</h1>
+<div id="clock-container" style="text-align: center; font-size: 28px; margin-bottom: 10px; font-weight: 500;"></div>
 
 <div class="board-wrapper">
     <div class="board" id="board"></div>
@@ -132,6 +133,37 @@ ws.onmessage = handleMessage;
 
 connectWS();
 
+
+function updateClock() {
+    const clockElement = document.getElementById("clock-container");
+    const now = new Date();
+
+    // Настройки форматирования даты
+    const dateOptions = { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+    };
+    
+    // Настройки форматирования времени
+    const timeOptions = { 
+        hour: '2-digit', 
+        minute: '2-digit', 
+        second: '2-digit' 
+    };
+
+    const dateString = now.toLocaleDateString('ru-RU', dateOptions);
+    const timeString = now.toLocaleTimeString('ru-RU', timeOptions);
+
+    // Выводим на экран (делаем первую букву дня недели заглавной)
+    const formattedDate = dateString.charAt(0).toUpperCase() + dateString.slice(1);
+    clockElement.textContent = `${formattedDate} ${timeString}`;
+}
+
+// Запускаем часы и обновляем их каждую секунду
+setInterval(updateClock, 1000);
+updateClock(); // Вызываем сразу, чтобы не ждать секунду до первого отображения
 
 /* ================= MESSAGE ================= */
 

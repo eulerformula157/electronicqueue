@@ -520,7 +520,7 @@ async function init() {
     try {
         // Получаем ID оператора
         const res = await fetch(`${API_URL}/auth/me`, {
-            headers: { "session-id": sessionToken } // исправлено
+            headers: { "session-id": sessionToken } 
         });
 
         if (!res.ok) {
@@ -531,10 +531,8 @@ async function init() {
         const data = await res.json();
         operatorId = data.operator_id; 
 
-        // После этого можно безопасно запускать WebSocket
         //initWebSocket();
 
-        // Параллельно можно загружать очередь, услуги и инфо
         loadOperatorInfo();
         //loadQueue();
         //loadAllServices();
@@ -576,7 +574,6 @@ function initWebSocket() {
 // Запускаем инициализацию
 init();
 initWebSocket();
-//loadOperatorInfo();
 loadQueue();
 loadAllServices();
 // ==================== WebSocket ====================
@@ -609,7 +606,6 @@ const servicesHtml = data.services && data.services.length > 0
         `).join("")
     : '<span style="color: var(--text-muted)">Услуги не назначены</span>';
 
-        // Метки: ЧЕРНЫЕ (font-weight 800), Данные: СЕРЫЕ (font-weight 600)
         document.getElementById("operator-info").innerHTML = `
             <div style="margin-bottom: 25px;">
                 <span style="color: var(--text-main); font-size: 1.1rem; text-transform: uppercase; font-weight: 800; letter-spacing: 0.5px;">Оператор</span><br>
@@ -704,7 +700,6 @@ async function callNext() {
     startCancelTimer();
 }
 
-// Улучшенная функция уведомлений с поддержкой разных цветов
 function showToast(message, type = "danger") {
     const toast = document.getElementById("toast-notification");
     toast.textContent = message;
@@ -742,7 +737,6 @@ async function finishCurrent() {
         const result = await res.json();
 
         if (res.ok) {
-            // КРИТИЧЕСКИ ВАЖНО: Сбрасываем ID текущего билета в null
             currentTicketId = null; 
             
             document.getElementById("current").textContent = "Окно свободно";
@@ -759,7 +753,7 @@ async function finishCurrent() {
             }
         }
 
-        loadQueue(); // обновляем очередь
+        loadQueue(); 
 
     } catch (e) {
         console.error(e);
@@ -849,7 +843,7 @@ async function changeWindowStatus(newStatus) {
             return;
         }
 
-        // 1. Получаем данные о текущем операторе и его окне одним запросом
+        // Получаем данные о текущем операторе и его окне одним запросом
         const resDetails = await fetch(`${API_URL}/operators/details`, {
             headers: { "session-id": sessionId }
         });
@@ -862,20 +856,18 @@ async function changeWindowStatus(newStatus) {
         const details = await resDetails.json();
 
         // Проверяем, привязано ли вообще окно
-        // В новом эндпоинте мы можем добавить window_id в возвращаемый JSON 
-        // (см. примечание ниже к Python коду)
         if (!details.window_id) {
             alert("За вами не закреплено активное окно");
             return;
         }
 
-        // 2. Проверка: если статус уже такой же, ничего не делаем
+        // Проверка: если статус уже такой же, ничего не делаем
         if (details.window_status === newStatus) {
             console.log("Статус уже установлен, пропускаем запрос.");
             return; 
         }
 
-        // 3. Отправляем запрос на смену статуса
+        // Отправляем запрос на смену статуса
         const res = await fetch(`${API_URL}/windows/update-status`, {
             method: "POST",
             headers: { 
@@ -896,7 +888,7 @@ async function changeWindowStatus(newStatus) {
 
         const result = await res.json();
         
-        // Обновляем UI (подсветка кнопок)
+        // Обновляем UI - подсветка кнопок
         updateStatusButtons(result.status); 
 
     } catch (e) {
@@ -913,25 +905,25 @@ function updateStatusButtons(status) {
 
     // Базовый сброс для всех состояний
     statusDot.style.boxShadow = "none";
-    statusDot.style.backgroundColor = ""; // Возвращаем к стилям из CSS классов
+    statusDot.style.backgroundColor = ""; 
 
     if (status === "online") {
-        // Кнопки
+
         startBtn.classList.add("status-active");
         stopBtn.classList.remove("btn-warning-active");
         
-        // Индикатор в информации
-        statusDot.className = "dot online"; // Класс .online вернет зеленый цвет
+
+        statusDot.className = "dot online";
         statusText.textContent = "В сети";
         statusText.style.color = "var(--success)";
     } else {
-        // Кнопки
+
         startBtn.classList.remove("status-active");
         stopBtn.classList.add("btn-warning-active");
         
-        // Индикатор в информации
+
         statusDot.className = "dot"; 
-        statusDot.style.backgroundColor = "var(--warning)"; // Принудительно желтый
+        statusDot.style.backgroundColor = "var(--warning)"; 
         statusDot.style.boxShadow = "0 0 8px var(--warning)";
         statusText.textContent = "На перерыве";
         statusText.style.color = "var(--warning)";
@@ -979,7 +971,6 @@ async function logout() {
             headers: { "session-id": sessionId }
         });
 
-        // Игнорируем ошибки сети, но очищаем локально
     } catch (e) {
         console.error(e);
     } finally {
@@ -991,12 +982,13 @@ async function logout() {
 let isNavigating = false;
 let isReloading = false;
 
-// Отслеживаем F5 / Ctrl+R
-window.addEventListener("keydown", function (event) {
-    if (event.key === "F5" || (event.ctrlKey && event.key.toLowerCase() === "r")) {
-        isReloading = true;
+function isReload() {
+    const navEntries = performance.getEntriesByType("navigation");
+    if (navEntries.length > 0) {
+        return navEntries[0].type === "reload";
     }
-});
+    return false;
+}
 
 // Отслеживаем навигацию по ссылкам
 document.addEventListener("click", function (event) {
@@ -1005,22 +997,38 @@ document.addEventListener("click", function (event) {
 });
 
 // Единый обработчик закрытия страницы
+// Вот тут не до конца работает, возможно придется отказаться и использовать polling
 window.addEventListener("beforeunload", function () {
-    if (isReloading || isNavigating) return;
-
     const sessionId = sessionStorage.getItem("session_id");
     if (!sessionId) return;
 
+    // если это reload то не логаутим
+    if (sessionStorage.getItem("isReload") === "true") {
+        return;
+    }
+
     const url = `${API_URL}/logout`;
-    const formData = new FormData();
-    formData.append("session_id", sessionId);
+    const data = new FormData();
+    data.append("session_id", sessionId);
 
-    navigator.sendBeacon(url, formData);
-
-    sessionStorage.removeItem("session_id");
+    navigator.sendBeacon(url, data);
 });
 
-// Добавьте это ко всем ссылкам/кнопкам, которые ведут на другие страницы
+window.addEventListener("keydown", function (event) {
+    if (event.key === "F5" || (event.ctrlKey && event.key.toLowerCase() === "r")) {
+        sessionStorage.setItem("isReload", "true");
+    }
+});
+
+window.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+        // возможный reload / закрытие
+    }
+});
+
+window.addEventListener("load", () => {
+    sessionStorage.removeItem("isReload");
+});
 document.querySelectorAll('a').forEach(link => {
     link.addEventListener('click', () => isNavigating = true);
 });
@@ -1080,16 +1088,15 @@ function startRecallTimer() {
 }
 
 
-let cancelInterval = null; // Переменная для хранения интервала
+let cancelInterval = null; 
 let cancelCooldown = false;
 const CANCEL_CD_TIME = 60000;
 
 async function cancelCurrent() {
-    // 1. Проверка: не идет ли уже отсчет таймера
+    // Проверка: не идет ли уже отсчет таймера
     if (cancelCooldown) return;
 
-    // 2. ПРОВЕРКА: есть ли вообще кого отменять?
-    // В вашем коде переменная currentTicketId обновляется при вызове и загрузке билета
+    // есть ли вообще кого отменять?
     if (!currentTicketId) {
         alert("Нет активного клиента для отмены.");
         return;
@@ -1131,10 +1138,10 @@ async function cancelCurrent() {
             if (typeof updateStatus === "function") updateStatus(); 
             
         } else {
-            // Если сервер вернул ошибку (например, "Нет активного билета" на стороне бэкенда)
+
             alert(data.detail || `Ошибка сервера: ${res.status}`);
             
-            // Если сервер говорит, что билета нет — синхронизируем клиент
+
             if (res.status === 404 || data.detail === "Нет активного билета для отмены") {
                 currentTicketId = null;
                 document.getElementById("current").textContent = "Окно свободно";
@@ -1151,7 +1158,7 @@ function startCancelTimer() {
     const btn = document.getElementById("cancel-btn");
     if (!btn) return;
 
-    // КРИТИЧЕСКИЙ МОМЕНТ: очищаем старый интервал перед запуском нового
+    // очищаем старый интервал перед запуском нового
     if (cancelInterval) {
         clearInterval(cancelInterval);
     }
@@ -1170,7 +1177,7 @@ function startCancelTimer() {
         
         if (secondsLeft <= 0) {
             clearInterval(cancelInterval);
-            cancelInterval = null; // Обнуляем ссылку
+            cancelInterval = null; 
             cancelCooldown = false;
             btn.disabled = false;
             btn.style.opacity = "1";
@@ -1182,11 +1189,9 @@ function startCancelTimer() {
 startCancelTimer();
 
 
-// Глобальные переменные (объявляем один раз в самом верху)
 let autoCallTimer = null;
 let secondsLeft = 5;
 
-// Исправленная единая функция остановки
 function stopAutoCall() {
     if (autoCallTimer) {
         clearInterval(autoCallTimer);
@@ -1204,7 +1209,7 @@ function runAutoCallLogic() {
         const toggle = document.getElementById('auto-call-toggle');
         const statusDisplay = document.getElementById("auto-call-status");
         
-        // ПРОВЕРКА №1: Если кнопку выключили, немедленно убиваем цикл
+        // Если кнопку выключили, немедленно убиваем цикл
         if (!toggle || !toggle.checked) {
             stopAutoCall();
             return;
@@ -1252,7 +1257,7 @@ function runAutoCallLogic() {
     }, 1000);
 }
 
-// ИНИЦИАЛИЗАЦИЯ (выполнять после объявления функций)
+// 
 const autoCallToggle = document.getElementById('auto-call-toggle');
 
 if (autoCallToggle) {

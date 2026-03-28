@@ -32,7 +32,9 @@ body {
 h1 {
     margin-bottom: 40px;
     color: var(--text-color);
-    font-size: 28px;
+    font-size: 38px;
+
+	
 }
 
 /* --- Контейнер кнопок --- */
@@ -112,17 +114,18 @@ button.service-btn.unavailable:hover {
 }
 
 @media print {
-    /* Скрываем весь основной интерфейс */
-    body > *:not(#print-receipt) {
-        display: none !important;
-    }
-
-    /* Показываем только чек */
+    body * { visibility: hidden; } /* Скрываем всё */
+    #print-receipt, #print-receipt * { visibility: visible; } /* Показываем только талон */
     #print-receipt {
-        display: block !important;
-        width: 100%;
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100% !important; /* Растягиваем на всю ширину ленты */
         margin: 0;
         padding: 0;
+    }
+    @page {
+        margin: 0; /* Убираем поля принтера (дату, заголовок страницы) */
     }
 }
 </style>
@@ -191,77 +194,138 @@ async function loadServices() {
 // --- Создание талона ---
 async function createTicket(serviceId, serviceName) {
     const buttons = document.querySelectorAll(".service-btn");
-    buttons.forEach(b => b.disabled = true);
+    
+    // Блокируем интерфейс на время обработки
+    buttons.forEach(btn => btn.disabled = true);
 
     try {
-        const res = await fetch(`${API_URL}/tickets/`, {
+        const response = await fetch(`${API_URL}/tickets/`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ service_id: serviceId })
         });
 
-        const ticket = await res.json();
+        const data = await response.json();
 
-        // СНАЧАЛА проверяем ошибку
-        if (!ticket || ticket.error) {
-            showNotice("В данный момент нет доступных специалистов", 3);
-            return; // Выходим, печать не вызываем
+        // Проверка на ошибки (404, 400 или кастомное поле error)
+        if (!response.ok || data.error) {
+            const errorMsg = data.detail || data.error || "Нет доступных специалистов";
+            showNotice(errorMsg, 3);
+            return; 
         }
+
+        // 1. Наполняем талон данными из ответа бэкенда
+        document.getElementById("receipt-number").textContent = data.number;
+        document.getElementById("receipt-service").textContent = data.service_name || serviceName;
+        document.getElementById("receipt-date").textContent = data.date || new Date().toLocaleString();
+
+        // 2. Логика отображения очереди перед человеком
+        const waitEl = document.getElementById("receipt-wait-count");
+        if (waitEl) {
+            waitEl.textContent = data.waiting_before > 0 
+                ? `ПЕРЕД ВАМИ В ОЧЕРЕДИ: ~ ${data.waiting_before} ЧЕЛ.` 
+                : "ВЫ СЛЕДУЮЩИЙ В ОЧЕРЕДИ!";
+        }
+
+        // 3. Запускаем процесс печати через iframe или текущее окно
+        printTicket();
         
-		document.getElementById("receipt-number").textContent = ticket.number;
-		document.getElementById("receipt-service").textContent = serviceName; // Печатаем имя
-		document.getElementById("receipt-date").textContent = new Date().toLocaleString();
+        // 4. Уведомляем другие модули через WebSocket
+        if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: "queue_updated" }));
+        }
 
-		// Вызываем печать
-		window.print();
-		
-        socket.send(JSON.stringify({ type: "queue_updated" }));
-        showNotice(`Возьмите ваш талон: ${ticket.number ?? "—"}`, NOTICE_DURATION);
+        // 5. Показываем финальное сообщение на экране терминала
+        showNotice(`Ваш номер: ${data.number}. Возьмите талон!`, NOTICE_DURATION);
 
-    } catch (e) {
-        console.error("Критическая ошибка:", e);
-        showNotice("Ошибка системы. Попробуйте позже.", 3);
+    } catch (error) {
+        console.error("Ошибка при создании билета:", error);
+        showNotice("Сбой связи с сервером. Обратитесь к администратору.", 4);
     } finally {
-        // Разблокируем кнопки в любом случае
-        buttons.forEach(b => {
-            if (!b.classList.contains("unavailable")) {
-                b.disabled = false;
+        // Разблокируем только те кнопки, которые не были принудительно выключены (статус inactive)
+        buttons.forEach(btn => {
+            if (!btn.classList.contains("unavailable")) {
+                btn.disabled = false;
             }
         });
     }
 }
 
-// --- Показ уведомления ---
 function showNotice(message, duration) {
     const notice = document.getElementById("ticket-notice");
     const timerEl = document.getElementById("ticket-timer");
+    const messageEl = document.getElementById("ticket-message");
 
-    document.getElementById("ticket-message").textContent = message;
+    // Останавливаем предыдущие таймеры, если они были (защита от "двойного" клика)
+    if (window.noticeInterval) clearInterval(window.noticeInterval);
 
-    let remaining = duration;
-    timerEl.textContent = remaining;
+    messageEl.textContent = message;
+    let secondsLeft = duration;
+    
+    timerEl.textContent = secondsLeft;
     notice.style.display = "flex";
 
-    const interval = setInterval(() => {
-        remaining--;
-        timerEl.textContent = remaining;
+    window.noticeInterval = setInterval(() => {
+        secondsLeft--;
+        timerEl.textContent = secondsLeft;
 
-        if (remaining <= 0) {
-            clearInterval(interval);
+        if (secondsLeft <= 0) {
+            clearInterval(window.noticeInterval);
             notice.style.display = "none";
         }
     }, 1000);
+}
+
+function printTicket() {
+    const receipt = document.getElementById("print-receipt");
+    
+    // Делаем видимым для корректного захвата браузером
+    receipt.style.display = "block";
+
+    // Вызов системного диалога печати
+    // При правильно настроенном @media print напечатается только этот блок
+    window.print();
+
+    // Скрываем обратно
+    receipt.style.display = "none";
+}
+
+function printTicket() {
+    // Показываем блок для расчетов (но он будет виден только при печати из-за @media print)
+    const receipt = document.getElementById("print-receipt");
+    receipt.style.display = "block";
+
+    // Вызываем системную печать
+    window.print();
+
+    // Снова скрываем
+    receipt.style.display = "none";
 }
 // --- Инициализация ---
 loadServices();
 </script>
 
-<div id="print-receipt" style="display: none; text-align: center; font-family: sans-serif; padding: 20px;">
-    <h1 style="font-size: 32px; margin: 10px 0;">ВАШ ТАЛОН</h1>
-    <div id="receipt-number" style="font-size: 80px; font-weight: bold; margin: 20px 0;"></div>
-    <h2 id="receipt-service" style="font-size: 28px; margin: 10px 0;"></h2>
-    <p id="receipt-date" style="font-size: 18px; margin-top: 30px;"></p>
-</div>
+<div id="print-receipt" style="display: none; width: 280px; text-align: center; font-family: 'Arial Black', Gadget, sans-serif; color: #000; background: #fff; line-height: 1.2;">
+    <div style="border-top: 4px solid #000; margin-bottom: 10px;"></div>
 
+    <div style="font-size: 18px; font-weight: 900; text-transform: uppercase;">Приемная комиссия</div>
+    <div style="font-size: 20px; margin-bottom: 10px;">ВАШ НОМЕР</div>
+    
+    <div id="receipt-number" style="font-size: 100px; font-weight: 900; line-height: 0.9; margin: 5px 0; border: 5px solid #000; padding: 10px 0;"></div>
+    
+    <div id="receipt-service" style="font-size: 20px; font-weight: bold; margin: 10px 0; text-transform: uppercase;"></div>
+    
+    <div id="receipt-wait-count" style="font-size: 18px; font-weight: bold; margin: 10px 0; padding: 5px; border: 1px solid #000;"></div>
+
+    <div style="border-top: 2px dashed #000; margin: 15px 0;"></div>
+
+    <div style="font-size: 14px; text-align: left; font-family: Arial, sans-serif;">
+        <strong>ВНИМАНИЕ:</strong> После вызова на табло у вас есть <strong>5 минут</strong>, чтобы подойти к окну. Затем вызов будет аннулирован.
+    </div>
+
+    <div id="receipt-date" style="font-size: 14px; margin-top: 15px; font-weight: normal;"></div>
+    
+    <div style="height: 80px;"></div> 
+</div>
 </body>
 </html>
