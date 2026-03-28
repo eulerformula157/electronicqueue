@@ -147,7 +147,28 @@ button.service-btn.unavailable:hover {
 </div>
 
 <script>
-const socket = new WebSocket("ws://localhost:8000/ws/terminal");
+function connectSocket() {
+    const socket = new WebSocket("ws://localhost:8000/ws/terminal");
+
+    socket.onopen = () => console.log("WS connected");
+
+    socket.onclose = () => {
+        console.log("WS reconnecting...");
+        setTimeout(connectSocket, 2000);
+    };
+
+    socket.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+
+        if (data.type === "services_updated") {
+            loadServices();
+        }
+    };
+
+    return socket;
+}
+
+let socket = connectSocket();
 
 socket.onmessage = function(event) {
     const data = JSON.parse(event.data);
