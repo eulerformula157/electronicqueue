@@ -683,6 +683,7 @@ async function callNext() {
             // Обновляем текущий билет и услугу
             currentTicketId = ticket.id;
             document.getElementById("current").textContent = ticket.number;
+			recallCurrent();
             document.getElementById("current-service").textContent =
                 ticket.service_name || "Услуга не указана";
 
@@ -998,16 +999,15 @@ document.addEventListener("click", function (event) {
 
 // Единый обработчик закрытия страницы
 // Вот тут не до конца работает, возможно придется отказаться и использовать polling
-window.addEventListener("beforeunload", function () {
+window.addEventListener("beforeunload", function (e) {
     const sessionId = sessionStorage.getItem("session_id");
     if (!sessionId) return;
 
-    // если это reload то не логаутим
-    if (sessionStorage.getItem("isReload") === "true") {
-        return;
-    }
-
-    const url = `${API_URL}/logout`;
+    // Подготавливаем данные. sendBeacon отправляет POST запрос.
+    // Важно: сервер должен уметь принимать такой запрос без сложного CORS preflight
+    const url = `${API_URL}/logout`; // Можно создать отдельный легкий эндпоинт
+    
+    // Передаем session_id, чтобы бэкенд понял, кто уходит
     const data = new FormData();
     data.append("session_id", sessionId);
 
