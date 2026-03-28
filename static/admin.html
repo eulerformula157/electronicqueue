@@ -432,6 +432,7 @@ async function loadWindows() {
             <td>
                 <button onclick="editWindow(${w.id},'${w.name}')">Название</button>
                 <button onclick="editWindowStatus(${w.id}, '${w.status}')">Статус</button>
+				<button class="btn-edit" onclick="editServices(${w.id})">Услуги</button>
                 <button style="background: #ffcccc;" onclick="deleteWindow(${w.id})">Удалить</button>
             </td>
         </tr>`;
@@ -615,7 +616,6 @@ async function loadOperators(){
           <td>
             <button onclick="editOperatorName(${op.id},'${op.name}')">Имя</button>
             <button onclick="editOperatorWindow(${op.id},${op.window_id})">Окно</button>
-            <button onclick="editServices(${op.id},${op.window_id})" ${!op.window_id?"disabled":""}>Услуги</button>
             <button onclick="editLoginPassword(${op.id})">Данные</button>
             <button style="background: #ffcccc;" onclick="deleteOperator(${op.id})">Удалить</button>
           </td>
@@ -723,8 +723,8 @@ loadOperators()
 
 //let openedServicesRow = null;
 
-async function editServices(operator_id, window_id) {
-    if (openedServicesRow && openedServicesRow.dataset.operatorId == operator_id) {
+async function editServices(window_id) {
+    if (openedServicesRow && openedServicesRow.dataset.operatorId == window_id) {
         openedServicesRow.remove();
         openedServicesRow = null;
         return;
@@ -743,11 +743,15 @@ async function editServices(operator_id, window_id) {
         });
     }
 
-    let html = `<tr id="servicesRow" data-operator-id="${operator_id}">
+    let html = `<tr id="servicesRow" data-operator-id="${window_id}">
         <td colspan="3"></td>
         <td>
             <div class="servicesBoxServices" style="max-width:600px; background:#fff; padding:15px; border:1px solid #ccc; border-radius:8px;">
                 <b>Настройка услуг (меньше число - выше приоритет)</b><br><br>`;
+
+	if (!services.length) {
+    services = await fetchJSON(`${API}/services/`);
+}
 
     for (let s of services) {
         let isActive = selectedMap.hasOwnProperty(s.id);
@@ -773,7 +777,7 @@ async function editServices(operator_id, window_id) {
         </td>
     </tr>`;
 
-    let row = document.getElementById(`row-${operator_id}`);
+    let row = document.getElementById(`window-${window_id}`);
     row.insertAdjacentHTML("afterend", html);
     openedServicesRow = document.getElementById("servicesRow");
 }
@@ -805,7 +809,7 @@ async function saveServicesWithPriority(windowId) {
 
     if (res) {
         alert("Настройки сохранены");
-        loadOperators();
+        loadWindows();
     }
 }
 

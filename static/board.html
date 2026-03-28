@@ -9,8 +9,8 @@ html,body{
     height:100%;
     margin:0;
     font-family:"Segoe UI",Arial,sans-serif;
-    background:#f9f9f9;   /* светлый фон */
-    color:#1a1d23;         /* тёмный текст */
+    background:#f9f9f9;   
+    color:#1a1d23;         
     overflow:hidden;
 }
 
@@ -18,16 +18,14 @@ h1{
     text-align:center;
     margin:15px 0;
     font-size:30px;
-    color:#1a1d23;        /* тёмный заголовок */
+    color:#1a1d23;        
 }
 
-/* Контейнер */
 .board-wrapper{
     height:calc(100vh - 120px);
     padding:20px;
 }
 
-/* Сетка */
 .board{
     display:grid;
     grid-template-columns:repeat(2, 1fr);
@@ -36,18 +34,17 @@ h1{
     height:95%;
 }
 
-/* Карточка */
 .card{
-    background:#ffffff;        /* белый фон карточки */
+    background:#ffffff;        
     border-radius:10px;
     display:flex;
     flex-direction:column;
     justify-content:center;
     align-items:center;
-    box-shadow:0 2px 10px rgba(0,0,0,0.1); /* легкая тень */
+    box-shadow:0 2px 10px rgba(0,0,0,0.1);
+    transition: all 0.3s ease;
 }
 
-/* Строка карточки */
 .line{
     display:flex;
     align-items:center;
@@ -56,27 +53,23 @@ h1{
     width:100%;
 }
 
-/* Талон */
 .ticket{
     font-size:48px;
     font-weight:700;
-    color:#2d89ef;   /* синий для акцента */
+    color:#2d89ef;   
 }
 
-/* Стрелка */
 .arrow{
     font-size:48px;
     opacity:0.6;
 }
 
-/* Окно */
 .window{
     font-size:48px;
     font-weight:700;
-    color:#ff7f50; /* оранжевый для окна */
+    color:#ff7f50; 
 }
 
-/* Статус */
 .status-indicator{
     position:fixed;
     bottom:10px;
@@ -85,10 +78,19 @@ h1{
     opacity:0.6;
 }
 
-/* Анимация нового */
-@keyframes flash{
-    0%{background:#2d89ef;}
-    100%{background:#ffffff;}
+/* Улучшенная анимация вызова */
+@keyframes call-flash {
+    0% { background: #ffffff; transform: scale(1); }
+    20% { background: #2d89ef; transform: scale(1.05); }
+    40% { background: #ffffff; transform: scale(1); }
+    60% { background: #2d89ef; transform: scale(1.05); }
+    100% { background: #ffffff; transform: scale(1); }
+}
+
+.calling {
+    animation: call-flash 1.5s ease-in-out;
+    border: 3px solid #2d89ef;
+    z-index: 10;
 }
 </style>
 </head>
@@ -105,107 +107,68 @@ h1{
 <div class="status-indicator" id="ws-status">WS: connecting...</div>
 
 <script>
-
 const WS_URL = "ws://localhost:8000/ws/board";
-
 let ws;
 let previousTickets = [];
 let initialized = false;
+let currentlyCallingId = null; // ID талона, который сейчас озвучивается
 
 /* ================= WEBSOCKET ================= */
 
 function connectWS(){
-
-ws = new WebSocket(WS_URL);
-
-ws.onopen = () => {
-document.getElementById("ws-status").textContent = "WS: connected";
-};
-
-ws.onclose = () => {
-document.getElementById("ws-status").textContent = "WS: reconnecting...";
-setTimeout(connectWS,3000);
-};
-
-ws.onmessage = handleMessage;
-
+    ws = new WebSocket(WS_URL);
+    ws.onopen = () => { document.getElementById("ws-status").textContent = "WS: connected"; };
+    ws.onclose = () => {
+        document.getElementById("ws-status").textContent = "WS: reconnecting...";
+        setTimeout(connectWS,3000);
+    };
+    ws.onmessage = handleMessage;
 }
-
 connectWS();
-
 
 function updateClock() {
     const clockElement = document.getElementById("clock-container");
     const now = new Date();
-
-    // Настройки форматирования даты
-    const dateOptions = { 
-        weekday: 'long', 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-    };
-    
-    // Настройки форматирования времени
-    const timeOptions = { 
-        hour: '2-digit', 
-        minute: '2-digit', 
-        second: '2-digit' 
-    };
-
+    const dateOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+    const timeOptions = { hour: '2-digit', minute: '2-digit', second: '2-digit' };
     const dateString = now.toLocaleDateString('ru-RU', dateOptions);
     const timeString = now.toLocaleTimeString('ru-RU', timeOptions);
-
-    // Выводим на экран (делаем первую букву дня недели заглавной)
     const formattedDate = dateString.charAt(0).toUpperCase() + dateString.slice(1);
     clockElement.textContent = `${formattedDate} ${timeString}`;
 }
-
-// Запускаем часы и обновляем их каждую секунду
 setInterval(updateClock, 1000);
-updateClock(); // Вызываем сразу, чтобы не ждать секунду до первого отображения
+updateClock(); 
 
 /* ================= MESSAGE ================= */
 
 function handleMessage(event) {
     const data = JSON.parse(event.data);
 
-    // 1. ПРОВЕРКА НА ПОВТОРНЫЙ ВЫЗОВ (RECALL)
-    if (data.type === "recall_ticket") {
-        console.log("Повторный вызов:", data.ticket_number);
-        // Создаем объект в формате, который понимает speakTicket
-        const recallTicket = {
-            number: data.ticket_number,
+    // Если это вызов или повтор - запоминаем номер для подсветки
+    if (data.type === "recall_ticket" || data.ticket_number) {
+        // Сохраняем номер талона как активный
+        currentlyCallingId = data.ticket_id || data.id || data.ticket_number; 
+        
+        const ticketToSpeak = {
+            id: currentlyCallingId,
+            number: data.ticket_number || data.number,
             window_name: data.window_name
         };
         
-        // Озвучиваем немедленно (или с небольшой задержкой)
-        speakTicket(recallTicket);
-        return; // Выходим, так как это не обновление списка
+        speakTicket(ticketToSpeak);
+        
+        // Если прилетел не список, а один тикет - принудительно перерисовываем
+        if (!data.tickets) renderPage(); 
     }
 
-    // 2. ОБРАБОТКА ОБНОВЛЕНИЯ СПИСКА ТИКЕТОВ (Стандартная логика)
-    const tickets = data.tickets || data;
-
-    // Проверяем, что пришел массив (на случай непредвиденных форматов)
-    if (Array.isArray(tickets)) {
-        tickets.forEach(ticket => {
-            const isNew = !previousTickets.find(t => t.id === ticket.id);
-
-            if (initialized && isNew) {
-                // playSound(); // если нужно звуковое уведомление
-                setTimeout(() => {
-                    speakTicket(ticket);
-                }, 700);
-            }
-        });
-
+    // Стандартное обновление списка
+    const tickets = data.tickets || (Array.isArray(data) ? data : null);
+    if (tickets) {
         previousTickets = tickets;
         updateBoard(tickets);
         initialized = true;
     }
 }
-
 
 /* ================= BOARD ================= */
 
@@ -214,167 +177,104 @@ let currentPage = 0;
 let pages = [];
 let pageTimer = null;
 
-
 function updateBoard(tickets){
-
-// разбиваем на страницы
-pages = [];
-
-for(let i = 0; i < tickets.length; i += PAGE_SIZE){
-pages.push(tickets.slice(i, i + PAGE_SIZE));
-}
-
-if(currentPage >= pages.length){
-currentPage = 0;
-}
-
-renderPage();
-
-// запускаем автопереключение (если страниц больше 1)
-if(pageTimer) clearInterval(pageTimer);
-
-if(pages.length > 1){
-pageTimer = setInterval(() => {
-currentPage = (currentPage + 1) % pages.length;
-renderPage();
-}, 5000); // каждые 5 секунд
-}
-
+    pages = [];
+    for(let i = 0; i < tickets.length; i += PAGE_SIZE){
+        pages.push(tickets.slice(i, i + PAGE_SIZE));
+    }
+    if(currentPage >= pages.length) currentPage = 0;
+    renderPage();
+    if(pageTimer) clearInterval(pageTimer);
+    if(pages.length > 1){
+        pageTimer = setInterval(() => {
+            currentPage = (currentPage + 1) % pages.length;
+            renderPage();
+        }, 5000);
+    }
 }
 
 function renderPage(){
+    const board = document.getElementById("board");
+    board.innerHTML = "";
+    const currentTickets = pages[currentPage] || [];
 
-const board = document.getElementById("board");
-board.innerHTML = "";
+    currentTickets.forEach(t => {
+        const card = document.createElement("div");
+        card.className = "card";
+        // Если этот талон сейчас озвучивается, добавляем класс анимации
+        if (currentlyCallingId === t.id || (initialized && !previousTickets.find(p => p.id === t.id))) {
+            card.classList.add("calling");
+        }
 
-const currentTickets = pages[currentPage] || [];
-
-currentTickets.forEach(t => {
-
-const card = document.createElement("div");
-card.className = "card";
-
-const isNew = !previousTickets.find(p => p.id === t.id);
-
-card.innerHTML = `
-<div class="line">
-    <span class="ticket">ТАЛОН ${t.number}</span>
-    <span class="arrow">→</span>
-    <span class="window">ОКНО ${t.window_name}</span>
-</div>
-`;
-
-if(isNew && initialized){
-card.style.animation = "flash 0.8s ease";
-}
-
-board.appendChild(card);
-
-});
-
-updateTitle()
-
+        card.innerHTML = `
+            <div class="line">
+                <span class="ticket">ТАЛОН ${t.number}</span>
+                <span class="arrow">→</span>
+                <span class="window">ОКНО ${t.window_name}</span>
+            </div>
+        `;
+        board.appendChild(card);
+    });
+    updateTitle();
 }
 
 function updateTitle(){
-const title = document.getElementById("title");
-
-if(pages.length > 1){
-title.textContent = `Табло очереди Приемной комиссии (${currentPage + 1}/${pages.length})`;
-}else{
-title.textContent = "Табло очереди Приемной комиссии";
-}
+    const title = document.getElementById("title");
+    title.textContent = pages.length > 1 
+        ? `Табло очереди Приемной комиссии (${currentPage + 1}/${pages.length})` 
+        : "Табло очереди Приемной комиссии";
 }
 
-/* ================= AUTO SCALE ================= */
-
-
-
-
-/* ================= SOUND ================= */
-
-//const callSound=new Audio("/static/sounds/ding.mp3");
-
-let soundEnabled=false;
-
-document.body.addEventListener("click",()=>{
-
-callSound.play().then(()=>{
-callSound.pause();
-callSound.currentTime=0;
-soundEnabled=true;
-});
-
-},{once:true});
-
-
-function playSound(){
-
-if(!soundEnabled) return;
-
-callSound.currentTime=0;
-callSound.play();
-
-}
-
-
-/* ================= VOICE IMPROVED ================= */
+/* ================= VOICE ================= */
 
 let queue = [];
 let audioPlaying = false;
 
 function speakTicket(ticket) {
-    queue.push(`Талон ${ticket.number}. Подойдите к окну ${ticket.window_name}.`);
+    queue.push(ticket);
     if (!audioPlaying) playQueue();
 }
 
 function playQueue() {
     if(queue.length === 0){
         audioPlaying = false;
+        currentlyCallingId = null;
+        renderPage(); // Снимаем выделение
         return;
     }
 
     audioPlaying = true;
-    const text = queue[0];
+    const ticket = queue[0];
+    currentlyCallingId = ticket.id;
+    renderPage(); // Подсвечиваем карточку в сетке
 
-    // Получаем голоса
+    const text = `Талон ${ticket.number}. Подойдите к окну ${ticket.window_name}.`;
     let voices = speechSynthesis.getVoices();
-    // Ищем более естественный голос, чаще это Google русский
     let voice = voices.find(v => v.lang === "ru-RU" && v.name.toLowerCase().includes("google")) 
                 || voices.find(v => v.lang === "ru-RU") 
                 || voices[0];
 
-    // Разбиваем текст на части для лучшей паузы
     const parts = text.split(/\.|,/).map(s => s.trim()).filter(Boolean);
 
     function speakPart(i){
         if(i >= parts.length) {
             queue.shift();
-            playQueue();
+            setTimeout(playQueue, 1000); 
             return;
         }
-
         const utterance = new SpeechSynthesisUtterance(parts[i]);
         utterance.voice = voice;
         utterance.lang = "ru-RU";
-        utterance.rate = 0.8;   // чуть медленнее, чтобы было разборчиво
-        utterance.pitch = 1.05; // чуть выше, звучит приятнее
-        utterance.volume = 1.0;
-
+        utterance.rate = 0.8;
         utterance.onend = () => speakPart(i+1);
         speechSynthesis.speak(utterance);
     }
-
     speakPart(0);
 }
 
-// Чтобы голоса точно загрузились
 speechSynthesis.onvoiceschanged = () => {
     console.log("Voices loaded", speechSynthesis.getVoices());
 };
-
-
 </script>
-
 </body>
 </html>

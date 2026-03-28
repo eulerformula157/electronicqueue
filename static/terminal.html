@@ -133,6 +133,10 @@ button.service-btn.unavailable:hover {
 
 <body>
 
+<audio id="silentAudio" loop>
+    <source src="https://raw.githubusercontent.com/anars/blank-audio/master/10-seconds-of-silence.mp3" type="audio/mp3">
+</audio>
+
 <h1>Выберите услугу</h1>
 
 <div id="services"></div>
@@ -301,6 +305,25 @@ function printTicket() {
     // Снова скрываем
     receipt.style.display = "none";
 }
+
+
+// Запуск "тишины" для предотвращения сна
+// чтобы пинг постоянно шел и не закрывалось окно
+
+function startAntiSleepAudio() {
+    const audio = document.getElementById('silentAudio');
+    audio.play().then(() => {
+        console.log("Anti-sleep audio started");
+    }).catch(err => {
+        console.warn("Audio play blocked, waiting for user interaction");
+    });
+}
+
+// Запускаем при первом клике в любом месте страницы
+document.addEventListener('click', () => {
+    startAntiSleepAudio();
+}, { once: true });
+
 // --- Инициализация ---
 loadServices();
 </script>

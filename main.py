@@ -18,6 +18,8 @@ from datetime import datetime
 from sqlalchemy import text
 import asyncio
 import secrets
+import time
+from datetime import datetime, timedelta
 
 DATABASE_URL = "postgresql://postgres:password@localhost:5432/postgres" # поменять пароль и адрес при развертывании
 
@@ -192,6 +194,7 @@ class UserSession(Base):
     session_id = Column(String, primary_key=True) 
     operator_id = Column(Integer, ForeignKey("operators.id"))
     created_at = Column(TIMESTAMP, server_default=text("NOW()"), nullable=False)
+    last_seen = Column(TIMESTAMP, server_default=text("NOW()"), nullable=False)
 
 class Admin(Base):
     __tablename__ = "admins"
@@ -213,6 +216,12 @@ class PriorityUpdate(BaseModel):
 class LoginRequest(BaseModel):
     login: str
     password: str
+
+class CallSpecificRequest(BaseModel):
+    number: int
+
+class PingRequest(BaseModel):
+    session_id: str
 # ------------------ Pydantic схемы ------------------
 
 class ServiceCreate(BaseModel):
@@ -470,10 +479,66 @@ async def call_next_ticket(operator: Operator = Depends(verify_session)):
         ticket.window_id = operator.window_id
         ticket.called_at = text("CURRENT_TIMESTAMP")
 
+        asyncio.create_task(broadcast_board())
+
         db.commit()
         db.refresh(ticket)
         
         # ДОБАВЬТЕ ЭТО: возвращаем объект с именем услуги
+        return {
+            "id": ticket.id,
+            "number": ticket.number,
+            "status": ticket.status,
+            "service_name": ticket.service.name if ticket.service else "Услуга не найдена"
+        }
+    finally:
+        db.close()
+
+@app.post("/tickets/call-specific", tags=["Tickets"])
+async def call_specific_ticket(data: CallSpecificRequest, operator: Operator = Depends(verify_session)):
+    db = SessionLocal()
+    try:
+        if not operator.window_id:
+            return {"detail": "Оператору не назначено окно"}
+
+        # Проверяем, не обслуживается ли уже клиент
+        current = db.query(Ticket).filter(
+            Ticket.window_id == operator.window_id,
+            Ticket.status == "waiting"
+        ).first()
+
+        if current:
+            return {"detail": f"Сначала завершите клиента: {current.number}"}
+
+        # Ищем билет по номеру со статусом "waiting" или "cancelled"
+        ticket = db.query(Ticket).filter(
+            Ticket.number == data.number,
+            Ticket.status.in_(["waiting", "cancelled"])
+        ).first()
+
+        if not ticket:
+            return {"detail": "Билет с таким номером не найден или недоступен для вызова"}
+
+        # Проверяем, может ли это окно обслуживать данную услугу
+        window_service = db.query(WindowService).filter(
+            WindowService.window_id == operator.window_id,
+            WindowService.service_id == ticket.service_id
+        ).first()
+
+        if not window_service:
+            return {"detail": "Ваше окно не обслуживает услугу этого талона"}
+
+        # Обновляем статус билета и привязываем к текущему окну
+        ticket.status = "called"
+        ticket.window_id = operator.window_id
+        ticket.called_at = text("CURRENT_TIMESTAMP")
+
+        db.commit()
+        db.refresh(ticket)
+        
+        # Обновляем табло
+        asyncio.create_task(broadcast_board())
+
         return {
             "id": ticket.id,
             "number": ticket.number,
@@ -559,7 +624,7 @@ def get_my_queue(operator: Operator = Depends(verify_session)):
         db.close()
 
 @app.post("/tickets/redirect", tags=["Tickets"])
-async def redirect_ticket(data: RedirectRequest):
+async def redirect_ticket(data: RedirectRequest, operator: Operator = Depends(verify_session)):
     db = SessionLocal()
     try:
         # 1. Получаем тикет в статусе "called"
@@ -1266,6 +1331,21 @@ async def get_my_details(operator: Operator = Depends(verify_session)):
         }
     finally:
         db.close()
+
+@app.post("/ping")
+async def ping(data: PingRequest): # FastAPI автоматически распарсит JSON в эту модель
+    db = SessionLocal()
+    try:
+        session = db.query(UserSession).filter(UserSession.session_id == data.session_id).first()
+        if session:
+            session.last_seen = datetime.now()
+            db.commit()
+            return {"status": "ok"}
+        else:
+            raise HTTPException(status_code=404, detail="Session not found")
+    finally:
+        db.close()
+
 # ------------------ Дополнительные функции ------------------
 
 def get_called_tickets():
@@ -1302,34 +1382,26 @@ async def broadcast_board():
             pass
 
 def update_services_status_for_window(db: Session, window_id: int):
-    # 1. Получаем услуги этого окна
-    service_ids = (
-        db.query(WindowService.service_id)
-        .filter(WindowService.window_id == window_id)
-        .all()
-    )
+    # 1. Получаем ID всех услуг, которые закреплены за данным окном
+    service_ids = [s[0] for s in db.query(WindowService.service_id).filter(WindowService.window_id == window_id).all()]
 
-    service_ids = [s[0] for s in service_ids]
+    for s_id in service_ids:
+        # 2. Проверяем, есть ли хоть ОДНО окно в статусе online для этой услуги
+        online_exists = db.query(WindowService).join(Window).filter(
+            WindowService.service_id == s_id,
+            Window.status == "online"
+        ).first() # .first() быстрее чем .count(), нам достаточно узнать есть ли хотя бы один
 
-    for service_id in service_ids:
-        # 2. Считаем online окна для этой услуги
-        online_count = (
-            db.query(WindowService)
-            .join(Window, Window.id == WindowService.window_id)
-            .filter(
-                WindowService.service_id == service_id,
-                Window.status == "online"
-            )
-            .count()
-        )
-
-        service = db.query(Service).filter(Service.id == service_id).first()
-
+        service = db.query(Service).filter(Service.id == s_id).first()
         if service:
-            service.status = "active" if online_count > 0 else "inactive"
-
+            new_status = "active" if online_exists else "inactive"
+            if service.status != new_status:
+                service.status = new_status
+    
+    # Убрали db.commit(), теперь это делает вызывающая функция
     db.commit()
-
+    
+    
 def get_operator_state(operator_id: int):
     db = SessionLocal()
     try:
@@ -1371,7 +1443,66 @@ def get_operator_state(operator_id: int):
     finally:
         db.close()
 
-    
+async def cleanup_sessions():
+    print("[System] Фоновая задача очистки сессий запущена")
+    while True:
+        await asyncio.sleep(30)
+        db: Session = SessionLocal()
+        try:
+
+            timeout_datetime = datetime.now() - timedelta(seconds=30)
+
+            # Ищем сессии, которые не обновлялись более 30 секунд
+            dead_sessions = db.query(UserSession).filter(
+                UserSession.last_seen < timeout_datetime
+            ).all()
+
+            if dead_sessions:
+                print(f"\n[Cleanup] Найдено мертвых сессий: {len(dead_sessions)}")
+                
+                updated_services_data = []
+
+                for session in dead_sessions:
+                    operator = db.query(Operator).filter(Operator.id == session.operator_id).first()
+                    if operator and operator.window_id:
+                        window = db.query(Window).filter(Window.id == operator.window_id).first()
+                        if window:
+                            window.status = "offline"
+                            db.flush() 
+
+                            update_services_status_for_window(db, window.id)
+                            
+                            services = db.query(Service).join(WindowService).filter(WindowService.window_id == window.id).all()
+                            for srv in services:
+                                db.refresh(srv)
+                                updated_services_data.append({
+                                    "service_id": srv.id,
+                                    "service_name": srv.name,
+                                    "status": srv.status
+                                })
+                                print(f"  > Услуга '{srv.name}': {srv.status}")
+                    
+                    db.delete(session)
+                
+                db.commit()
+
+                await manager.broadcast({
+                    "type": "services_updated",
+                    "data": updated_services_data
+                })
+                print(f"[Cleanup] Оповещение об изменении {len(updated_services_data)} услуг отправлено.")
+
+        except Exception as e:
+            print(f"[Cleanup] ОШИБКА: {e}")
+            db.rollback()
+        finally:
+            db.close()
+            
+            
+@app.on_event("startup")
+async def startup():
+    asyncio.create_task(cleanup_sessions())
+ 
 @app.patch("/window-services/priority")
 async def update_priority(data: PriorityUpdate, admin: Admin = Depends(verify_admin_session)):
     db = SessionLocal()

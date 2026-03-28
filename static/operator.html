@@ -424,6 +424,9 @@ input:checked + .slider:before {
 </head>
 
 <body>
+
+
+
 <div id="toast-notification" style="display:none; position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: var(--danger); color: white; padding: 15px 30px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); z-index: 1000; font-weight: 600;">
     Закончите с текущим клиентом!
 </div>
@@ -464,7 +467,8 @@ input:checked + .slider:before {
 
         <div class="button-group" style="margin-top: 15px; justify-content: center;">
             <button class="btn-outline" id="recall-btn" onclick="recallCurrent()">ПОВТОРИТЬ ВЫЗОВ</button>
-            <button class="btn-outline" id="cancel-btn" onclick="cancelCurrent()">НЕ ПОДОШЕЛ</button>
+            <button class="btn-outline" id="cancel-btn" onclick="cancelCurrent()">ОТМЕНИТЬ ВЫЗОВ</button>
+			<button class="btn-outline" onclick="promptCallByNumber()">ВЫЗВАТЬ ПО НОМЕРУ</button>
             <button class="btn-outline" onclick="showRedirect()">ПЕРЕНАПРАВИТЬ</button>
         </div>
 
@@ -548,27 +552,26 @@ async function init() {
 function initWebSocket() {
     const socket = new WebSocket(`ws://localhost:8000/ws/terminal`);
 
-	socket.onopen = () => {
-		console.log("WebSocket подключен");
-	};
+    socket.onopen = () => {
+        console.log("WebSocket подключен");
+    };
 
-	socket.onmessage = function(event) {
-		const data = JSON.parse(event.data);
+    socket.onmessage = function(event) {
+        const data = JSON.parse(event.data);
 
-		if (data.type === "services_updated") {
-			// обновляем информацию об операторе сразу при изменении окна
-			loadOperatorInfo();
-		}    
-		
-		if (data.type === "queue_updated") {
-			// обновляем информацию об очереди сразу при изменении
-			loadQueue();
-		}
-	};
+        if (data.type === "services_updated") {
+            loadOperatorInfo();
+        }    
 
-	socket.onclose = () => {
-		console.log("WebSocket отключен");
-	};
+        if (data.type === "queue_updated") {
+            loadQueue();
+        }
+    };
+
+    socket.onclose = () => {
+        console.log("WebSocket отключен, переподключение...");
+        setTimeout(initWebSocket, 2000);
+    };
 }
 
 // Запускаем инициализацию
@@ -675,6 +678,7 @@ async function callNext() {
                 "Content-Type": "application/json",
                 "session-id": sessionId
             }
+			
         });
 
         const ticket = await res.json();
@@ -684,6 +688,7 @@ async function callNext() {
             currentTicketId = ticket.id;
             document.getElementById("current").textContent = ticket.number;
 			recallCurrent();
+			
             document.getElementById("current-service").textContent =
                 ticket.service_name || "Услуга не указана";
 
@@ -698,7 +703,7 @@ async function callNext() {
     }
 
     loadQueue();
-    startCancelTimer();
+
 }
 
 function showToast(message, type = "danger") {
@@ -778,7 +783,6 @@ async function loadAllServices() {
    Показ панели перенаправления
 ========================= */
 function showRedirect() {
-	currentTicketId = loadCurrentTicket();
 
     if (!currentTicketId) {
         alert("Нет текущего клиента");
@@ -813,14 +817,17 @@ async function confirmRedirect() {
         return;
     }
 
-    const res = await fetch(`${API_URL}/tickets/redirect`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            ticket_id: currentTicketId,
-            new_service_id: parseInt(newServiceId)
-        })
-    });
+	const res = await fetch(`${API_URL}/tickets/redirect`, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			"session-id": sessionId
+		},
+		body: JSON.stringify({
+			ticket_id: currentTicketId,
+			new_service_id: parseInt(newServiceId)
+		})
+	});
 
     const result = await res.json();
 
@@ -997,23 +1004,6 @@ document.addEventListener("click", function (event) {
     if (link) isNavigating = true;
 });
 
-// Единый обработчик закрытия страницы
-// Вот тут не до конца работает, возможно придется отказаться и использовать polling
-window.addEventListener("beforeunload", function (e) {
-    const sessionId = sessionStorage.getItem("session_id");
-    if (!sessionId) return;
-
-    // Подготавливаем данные. sendBeacon отправляет POST запрос.
-    // Важно: сервер должен уметь принимать такой запрос без сложного CORS preflight
-    const url = `${API_URL}/logout`; // Можно создать отдельный легкий эндпоинт
-    
-    // Передаем session_id, чтобы бэкенд понял, кто уходит
-    const data = new FormData();
-    data.append("session_id", sessionId);
-
-    navigator.sendBeacon(url, data);
-});
-
 window.addEventListener("keydown", function (event) {
     if (event.key === "F5" || (event.ctrlKey && event.key.toLowerCase() === "r")) {
         sessionStorage.setItem("isReload", "true");
@@ -1058,6 +1048,9 @@ async function recallCurrent() {
 
         if (res.ok) {
             startRecallTimer();
+
+	
+
         } else {
             const err = await res.json();
             alert(err.detail || "Ошибка вызова");
@@ -1073,7 +1066,7 @@ function startRecallTimer() {
     btn.disabled = true;
     
     let secondsLeft = RECALL_CD_TIME / 1000;
-    const originalText = "Голосовое оповещение";
+    const originalText = "ПОВТОРИТЬ ВЫЗОВ";
     
     const interval = setInterval(() => {
         secondsLeft--;
@@ -1093,8 +1086,6 @@ let cancelCooldown = false;
 const CANCEL_CD_TIME = 60000;
 
 async function cancelCurrent() {
-    // Проверка: не идет ли уже отсчет таймера
-    if (cancelCooldown) return;
 
     // есть ли вообще кого отменять?
     if (!currentTicketId) {
@@ -1119,8 +1110,6 @@ async function cancelCurrent() {
         }
 
         if (res.ok) {
-            // Запускаем таймер только если отмена прошла успешно
-            startCancelTimer();
 
             const msg = data.ticket_number ? `Билет ${data.ticket_number} отменен` : "Билет успешно отменен";
             alert(msg);
@@ -1133,7 +1122,7 @@ async function cancelCurrent() {
             
             // Сбрасываем ID текущего билета, так как его больше нет
             currentTicketId = null; 
-            
+
             loadQueue(); 
             if (typeof updateStatus === "function") updateStatus(); 
             
@@ -1154,39 +1143,7 @@ async function cancelCurrent() {
     }
 }
 
-function startCancelTimer() {
-    const btn = document.getElementById("cancel-btn");
-    if (!btn) return;
 
-    // очищаем старый интервал перед запуском нового
-    if (cancelInterval) {
-        clearInterval(cancelInterval);
-    }
-
-    cancelCooldown = true;
-    btn.disabled = true;
-    btn.style.opacity = "0.6";
-    
-    let secondsLeft = CANCEL_CD_TIME / 1000;
-    const originalText = "Не подошел";
-    
-    // Сохраняем ID нового интервала
-    cancelInterval = setInterval(() => {
-        secondsLeft--;
-        btn.textContent = `Доступно через ${secondsLeft}с`;
-        
-        if (secondsLeft <= 0) {
-            clearInterval(cancelInterval);
-            cancelInterval = null; 
-            cancelCooldown = false;
-            btn.disabled = false;
-            btn.style.opacity = "1";
-            btn.textContent = originalText;
-        }
-    }, 1000);
-}
-
-startCancelTimer();
 
 
 let autoCallTimer = null;
@@ -1283,6 +1240,126 @@ if (autoCallToggle) {
     });
 }
 
+/* =========================
+   Вызов по конкретному номеру
+========================= */
+async function promptCallByNumber() {
+    if (currentTicketId !== null && currentTicketId !== undefined) {
+        showToast("Закончите с текущим клиентом!", "danger");
+        return;
+    }
+
+    const numStr = prompt("Введите номер талона для вызова:");
+    if (!numStr) return; // Если нажали "Отмена" или ввели пустую строку
+    
+    const ticketNumber = parseInt(numStr.trim(), 10);
+    if (isNaN(ticketNumber)) {
+        alert("Пожалуйста, введите корректный числовой номер.");
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_URL}/tickets/call-specific`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "session-id": sessionId
+            },
+            body: JSON.stringify({ number: ticketNumber })
+        });
+
+        const data = await res.json();
+
+        if (res.ok && data.id) {
+            // Успешно вызвали
+			
+            currentTicketId = data.id;
+            document.getElementById("current").textContent = data.number;
+            document.getElementById("current-service").textContent = data.service_name || "Услуга не указана";
+            
+            document.getElementById("toast-notification").style.display = "none";
+            
+            loadQueue();
+        } else {
+            // Вывод ошибки от бэкенда
+            alert(data.detail || "Не удалось вызвать данный талон.");
+        }
+    } catch (e) {
+        console.error(e);
+        alert("Ошибка соединения с сервером");
+    }
+	
+}
+
+
+window.addEventListener("beforeunload", () => {
+    sessionStorage.setItem("isReloading", "true");
+});
+
+window.addEventListener("load", () => {
+    sessionStorage.removeItem("isReloading");
+});
+
+window.addEventListener("unload", () => {
+    const data = new Blob(
+        [JSON.stringify({ session_id: sessionStorage.getItem("session_id") })],
+        { type: "application/json" }
+    );
+
+    navigator.sendBeacon("http://localhost:8000/logout", data);
+});
+
+// Создаем воркер прямо из строки кода
+const pingWorkerCode = `
+    setInterval(() => {
+        postMessage('ping-tick');
+    }, 5000); // интервал 5 секунд
+`;
+
+const blob = new Blob([pingWorkerCode], { type: 'application/javascript' });
+const worker = new Worker(URL.createObjectURL(blob));
+
+worker.onmessage = function() {
+    const sessionId = sessionStorage.getItem("session_id");
+    if (!sessionId) return;
+
+    fetch("http://localhost:8000/ping", {
+        method: "POST",
+        headers: { 
+            "Content-Type": "application/json" 
+        },
+        body: JSON.stringify({ "session_id": sessionId }) // ТУТ ДОЛЖНЫ БЫТЬ СКОБКИ И КЛЮЧ
+    })
+    .then(response => {
+        if (response.status === 422) {
+            console.error("Сервер все еще не принимает формат. Проверьте main.py");
+        }
+    })
+    .catch(err => console.debug("Ошибка фонового пинга:", err));
+};
+
+
+//<audio id="silentAudio" loop>
+//    <source src="https://raw.githubusercontent.com/anars/blank-audio/master/10-seconds-of-silence.mp3" type="audio/mp3">
+//</audio>
+
+
+// Запуск "тишины" для предотвращения сна
+// чтобы пинг постоянно шел и не закрывалось окно
+
+//function startAntiSleepAudio() {
+//    const audio = document.getElementById('silentAudio');
+//    audio.play().then(() => {
+//        console.log("Anti-sleep audio started");
+//    }).catch(err => {
+//        console.warn("Audio play blocked, waiting for user interaction");
+//    });
+//}
+
+// Запускаем при первом клике в любом месте страницы
+//document.addEventListener('click', () => {
+//    startAntiSleepAudio();
+//}, { once: true });
 </script>
 
 </body>
