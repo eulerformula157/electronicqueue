@@ -729,21 +729,63 @@ async def recall_ticket(operator: Operator = Depends(verify_session)):
         db.close()
 
 @app.post("/operators/", tags=["Operators"])
-def create_operator(operator: OperatorCreate, admin: Admin = Depends(verify_admin_session)):
+def create_operator(
+    operator: OperatorCreate, admin: Admin = Depends(verify_admin_session)
+    ):
     db = SessionLocal()
-    db_operator = Operator(**operator.dict())
-    db.add(db_operator)
-    db.commit()
-    db.refresh(db_operator)
-    db.close()
-    return db_operator
+    try:
+        # 1. Хэшируем пароль перед сохранением в базу
+        # (функцию get_password_hash мы создали на прошлом шаге)
+        hashed_password = get_password_hash(operator.password)
+
+        # 2. Создаем объект оператора с хэшированным паролем
+        db_operator = Operator(
+            name=operator.name,
+            login=operator.login,
+            password=hashed_password,
+            window_id=operator.window_id,
+        )
+
+        db.add(db_operator)
+        db.commit()
+        db.refresh(db_operator)
+
+        # 3. Возвращаем созданного оператора, но вместо хэша отдаем точки
+        return {
+            "id": db_operator.id,
+            "name": db_operator.name,
+            "login": db_operator.login,
+            "window_id": db_operator.window_id,
+            "password": "••••••",  # Админ видит это на экране вместо хэша
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        db.close()
 
 @app.get("/operators/", tags=["Operators"])
-async def list_operators(admin: Admin = Depends(verify_admin_session)): # Добавили защиту
+async def list_operators(admin: Admin = Depends(verify_admin_session)):
     db = SessionLocal()
-    operators = db.query(Operator).order_by(Operator.id).all()
-    db.close()
-    return operators
+    try:
+        # Получаем всех операторов из базы
+        operators = db.query(Operator).order_by(Operator.id).all()
+        
+        # Создаем новый список, где вместо хэшей паролей будут точки
+        safe_operators = []
+        for op in operators:
+            safe_operators.append({
+                "id": op.id,
+                "name": op.name,
+                "login": op.login,
+                "window_id": op.window_id,
+                "password": "••••••"  # Прячем хэш от фронтенда
+            })
+            
+        return safe_operators
+    finally:
+        # Блок finally гарантирует, что база закроется даже при ошибке
+        db.close()
 
 
 @app.post("/windows/", tags=["Windows"])
@@ -898,7 +940,7 @@ async def login(data: LoginRequest):
         # 1. Сначала ищем в таблице администраторов ПО ЛОГИНУ
         admin = db.query(Admin).filter(Admin.login == data.login).first()
         
-        # Если админ найден, проверяем его пароль через функцию verify_password
+        # Проверяем хэшированный пароль админа
         if admin and verify_password(data.password, admin.password):
             token = secrets.token_hex(32)
             new_session = AdminSession(session_id=token, admin_id=admin.id)
@@ -910,48 +952,50 @@ async def login(data: LoginRequest):
                 "role": "admin"
             }
             
-        # 2. Если не админ, ищем в операторах (пока оставляем вашу старую логику)
-        operator = db.query(Operator).filter(
-            Operator.login == data.login,
-            Operator.password == data.password
-        ).first()
+        # 2. Если не админ, ищем в операторах ПО ЛОГИНУ
+        operator = db.query(Operator).filter(Operator.login == data.login).first()
         
-        if not operator:
-            raise HTTPException(status_code=401, detail="Неверный логин или пароль")
-        
-        token = secrets.token_hex(32)
-        new_session = UserSession(
-            session_id=token, 
-            operator_id=operator.id, 
-            created_at=datetime.now()
-        )
-        db.add(new_session)
-        
-        # Логика статуса окна (из вашего кода)
-        if operator.window_id:
-            window = db.query(Window).filter(Window.id == operator.window_id).first()
-            if window:
-                window.status = "online"
-                db.flush() 
-                update_services_status_for_window(db, window.id)
+        # Проверяем хэшированный пароль оператора
+        if operator and verify_password(data.password, operator.password):
+            token = secrets.token_hex(32)
+            new_session = UserSession(
+                session_id=token, 
+                operator_id=operator.id, 
+                created_at=datetime.now()
+            )
+            db.add(new_session)
+            
+            # Логика статуса окна
+            if operator.window_id:
+                window = db.query(Window).filter(Window.id == operator.window_id).first()
+                if window:
+                    window.status = "online"
+                    db.flush() 
+                    update_services_status_for_window(db, window.id)
+                    db.commit()
+                    await manager.broadcast({
+                        "type": "services_updated",
+                        "window_id": operator.window_id
+                    })
+                else:
+                    db.commit()
+            else:
                 db.commit()
-                await manager.broadcast({
-                    "type": "services_updated",
-                    "window_id": operator.window_id
-                })
-        else:
-            db.commit()
 
-        return {
-            "session_id": token,
-            "name": operator.name,
-            "window_id": operator.window_id,
-            "role": "operator" # Флаг для фронтенда
-        }
+            return {
+                "session_id": token,
+                "name": operator.name,
+                "window_id": operator.window_id,
+                "role": "operator"
+            }
+
+        # 3. Если никто не подошел
+        raise HTTPException(status_code=401, detail="Неверный логин или пароль")
 
     except Exception as e:
         db.rollback()
-        if isinstance(e, HTTPException): raise e
+        if isinstance(e, HTTPException): 
+            raise e
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
@@ -1193,20 +1237,37 @@ async def update_operator(operator_id: int, data: dict):
     return op
 
 @app.put("/operators/{operator_id}/login", tags=["Operators"])
-def update_operator_login(operator_id: int = Path(..., gt=0), data: OperatorLoginUpdate = ..., admin: Admin = Depends(verify_admin_session)):
+def update_operator_login(
+    operator_id: int = Path(..., gt=0), 
+    data: OperatorLoginUpdate = Body(...), 
+    admin: Admin = Depends(verify_admin_session)
+):
     db: Session = SessionLocal()
-    operator = db.query(Operator).filter(Operator.id == operator_id).first()
-    if not operator:
-        db.close()
-        raise HTTPException(status_code=404, detail="Operator not found")
+    try:
+        operator = db.query(Operator).filter(Operator.id == operator_id).first()
+        if not operator:
+            raise HTTPException(status_code=404, detail="Operator not found")
 
-    # Обновляем поля
-    operator.login = data.login
-    operator.password = data.password  # можно добавить хэширование, если нужно
-    db.commit()
-    db.refresh(operator)
-    db.close()
-    return {"message": "Login and password updated", "operator_id": operator.id}
+        # Обновляем логин
+        operator.login = data.login
+        
+        # ХЭШИРУЕМ новый пароль перед сохранением
+        operator.password = get_password_hash(data.password)
+        
+        db.commit()
+        db.refresh(operator)
+        
+        # Возвращаем ответ без самого пароля (даже хэшированного)
+        return {
+            "message": "Login and password updated", 
+            "operator_id": operator.id,
+            "login": operator.login
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Ошибка при обновлении: {str(e)}")
+    finally:
+        db.close()
 
 @app.get("/operator/dashboard", tags=["Operators"])
 def get_dashboard_data(operator: Operator = Depends(verify_session)):
