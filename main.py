@@ -20,6 +20,10 @@ import asyncio
 import secrets
 import time
 from datetime import datetime, timedelta
+from passlib.context import CryptContext
+import bcrypt
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 DATABASE_URL = "postgresql://postgres:password@localhost:5432/postgres" # поменять пароль и адрес при развертывании
 
@@ -891,13 +895,11 @@ async def delete_window_service(window_id: int, service_id: int, admin: Admin = 
 async def login(data: LoginRequest):
     db = SessionLocal()
     try:
-        # 1. Сначала ищем в таблице администраторов
-        admin = db.query(Admin).filter(
-            Admin.login == data.login, 
-            Admin.password == data.password
-        ).first()
-
-        if admin:
+        # 1. Сначала ищем в таблице администраторов ПО ЛОГИНУ
+        admin = db.query(Admin).filter(Admin.login == data.login).first()
+        
+        # Если админ найден, проверяем его пароль через функцию verify_password
+        if admin and verify_password(data.password, admin.password):
             token = secrets.token_hex(32)
             new_session = AdminSession(session_id=token, admin_id=admin.id)
             db.add(new_session)
@@ -905,12 +907,12 @@ async def login(data: LoginRequest):
             return {
                 "session_id": token,
                 "name": admin.name,
-                "role": "admin" # Флаг для фронтенда
+                "role": "admin"
             }
-
-        # 2. Если не админ, ищем в операторах
+            
+        # 2. Если не админ, ищем в операторах (пока оставляем вашу старую логику)
         operator = db.query(Operator).filter(
-            Operator.login == data.login, 
+            Operator.login == data.login,
             Operator.password == data.password
         ).first()
         
@@ -1358,6 +1360,20 @@ async def ping(data: PingRequest): # FastAPI автоматически расп
     finally:
         db.close()
 
+@app.patch("/window-services/priority")
+async def update_priority(data: PriorityUpdate, admin: Admin = Depends(verify_admin_session)):
+    db = SessionLocal()
+    ws = db.query(WindowService).filter(
+        WindowService.window_id == data.window_id, 
+        WindowService.service_id == data.service_id
+    ).first()
+    if ws:
+        ws.priority = data.priority
+        db.commit()
+    await manager.broadcast({"type": "services_updated"})
+    db.close()
+    return {"status": "updated"}
+
 # ------------------ Дополнительные функции ------------------
 
 def get_called_tickets():
@@ -1412,7 +1428,6 @@ def update_services_status_for_window(db: Session, window_id: int):
     
     # Убрали db.commit(), теперь это делает вызывающая функция
     db.commit()
-    
     
 def get_operator_state(operator_id: int):
     db = SessionLocal()
@@ -1510,24 +1525,25 @@ async def cleanup_sessions():
         finally:
             db.close()
             
+def get_password_hash(password: str) -> str:
+    # Переводим строку в байты и хэшируем
+    pwd_bytes = password.encode("utf-8")
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(pwd_bytes, salt)
+    return hashed.decode("utf-8")  # возвращаем строку для сохранения в БД
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    # Проверяем совпадение чистого пароля и хэша из БД
+    return bcrypt.checkpw(
+        plain_password.encode("utf-8"), hashed_password.encode("utf-8")
+    )
             
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(cleanup_sessions())
  
-@app.patch("/window-services/priority")
-async def update_priority(data: PriorityUpdate, admin: Admin = Depends(verify_admin_session)):
-    db = SessionLocal()
-    ws = db.query(WindowService).filter(
-        WindowService.window_id == data.window_id, 
-        WindowService.service_id == data.service_id
-    ).first()
-    if ws:
-        ws.priority = data.priority
-        db.commit()
-    await manager.broadcast({"type": "services_updated"})
-    db.close()
-    return {"status": "updated"}
+
 
 # ------------------ Создание таблиц ------------------
 Base.metadata.create_all(bind=engine)
