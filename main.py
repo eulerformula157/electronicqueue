@@ -1,4 +1,6 @@
 # main.py
+import os
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Body, Header, Depends, status
 from pydantic import BaseModel
 from sqlalchemy import Column, Integer, String, ForeignKey, TIMESTAMP, text
@@ -12,20 +14,23 @@ from fastapi.params import Path
 from sqlalchemy.orm import Session
 from fastapi import APIRouter
 from fastapi import WebSocket, WebSocketDisconnect
-from typing import List
 import json
-from datetime import datetime
-from sqlalchemy import text
+from datetime import datetime, timedelta
 import asyncio
 import secrets
 import time
-from datetime import datetime, timedelta
 from passlib.context import CryptContext
 import bcrypt
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Загружаем переменные из файла main.env
+load_dotenv("main.env")
 
-DATABASE_URL = "postgresql://postgres:password@localhost:5432/postgres" # поменять пароль и адрес при развертывании
+# Читаем константы из окружения с фоллбеками на значения по умолчанию
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5432/postgres")
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
+SESSION_TIMEOUT_SECONDS = int(os.getenv("SESSION_TIMEOUT_SECONDS", "30"))
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
@@ -131,7 +136,7 @@ def verify_admin_session(session_id: str = Header(None)):
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # доступ могут получить все пк, находящиеся в подсети (проверить мб такое решение небезопасное)
+    allow_origins=CORS_ORIGINS,  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1534,13 +1539,11 @@ def get_operator_state(operator_id: int):
 async def cleanup_sessions():
     print("[System] Фоновая задача очистки сессий запущена")
     while True:
-        await asyncio.sleep(30)
+        await asyncio.sleep(SESSION_TIMEOUT_SECONDS)
         db: Session = SessionLocal()
         try:
+            timeout_datetime = datetime.now() - timedelta(seconds=SESSION_TIMEOUT_SECONDS)
 
-            timeout_datetime = datetime.now() - timedelta(seconds=30)
-
-            # Ищем сессии, которые не обновлялись более 30 секунд
             dead_sessions = db.query(UserSession).filter(
                 UserSession.last_seen < timeout_datetime
             ).all()
@@ -1548,37 +1551,43 @@ async def cleanup_sessions():
             if dead_sessions:
                 print(f"\n[Cleanup] Найдено мертвых сессий: {len(dead_sessions)}")
                 
-                updated_services_data = []
+                need_board_update = False  # Флаг для обновления табло
 
                 for session in dead_sessions:
                     operator = db.query(Operator).filter(Operator.id == session.operator_id).first()
+                    
                     if operator and operator.window_id:
+                        # 1. Обработка подвисшего тикета
+                        active_ticket = db.query(Ticket).filter(
+                            Ticket.window_id == operator.window_id,
+                            Ticket.status == "called"
+                        ).first()
+
+                        if active_ticket:
+                            print(f"  ! Тикет {active_ticket.number} возвращен в очередь из-за разрыва сессии")
+                            active_ticket.status = "waiting"
+                            active_ticket.window_id = None
+                            active_ticket.called_at = None
+                            need_board_update = True
+
+                        # 2. Перевод окна в offline
                         window = db.query(Window).filter(Window.id == operator.window_id).first()
                         if window:
                             window.status = "offline"
                             db.flush() 
-
                             update_services_status_for_window(db, window.id)
-                            
-                            services = db.query(Service).join(WindowService).filter(WindowService.window_id == window.id).all()
-                            for srv in services:
-                                db.refresh(srv)
-                                updated_services_data.append({
-                                    "service_id": srv.id,
-                                    "service_name": srv.name,
-                                    "status": srv.status
-                                })
-                                print(f"  > Услуга '{srv.name}': {srv.status}")
                     
                     db.delete(session)
                 
                 db.commit()
 
-                await manager.broadcast({
-                    "type": "services_updated",
-                    "data": updated_services_data
-                })
-                print(f"[Cleanup] Оповещение об изменении {len(updated_services_data)} услуг отправлено.")
+                # Уведомляем всех об изменениях
+                await manager.broadcast({"type": "services_updated"})
+                
+                if need_board_update:
+                    # Если был сброшен вызванный тикет, обновляем табло (чтобы номер исчез)
+                    await broadcast_board()
+                    await manager.broadcast({"type": "queue_updated"})
 
         except Exception as e:
             print(f"[Cleanup] ОШИБКА: {e}")
