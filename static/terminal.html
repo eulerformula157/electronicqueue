@@ -1,375 +1,41 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8">
-<title>Терминал очереди</title>
-
-<style>
-/* --- Константы --- */
-:root {
-    --button-height: 140px;
-    --button-width: 300px;
-    --button-font-size: 18px;
-    --button-gap: 20px;
-    --main-bg: #f4f6f8;
-    --button-bg: #e05d1b;
-    --button-hover-bg: #1490a3;
-    --text-color: #333;
-    --notice-bg: #333;
-}
-
-/* --- Страница --- */
-body {
-    margin: 0;
-    padding: 40px 20px;
-    font-family: Arial, sans-serif;
-    text-align: center;
-    background: var(--main-bg);
-    min-height: 100vh;
-    box-sizing: border-box;
-}
-
-h1 {
-    margin-bottom: 40px;
-    color: var(--text-color);
-    font-size: 38px;
-
-	
-}
-
-/* --- Контейнер кнопок --- */
-#services {
-    display: flex;
-    justify-content: center;
-    flex-wrap: wrap;
-    gap: var(--button-gap);
-    max-width: 1000px;
-    margin: 0 auto 30px auto;
-}
-
-/* --- Кнопки --- */
-button.service-btn {
-    width: var(--button-width);
-    height: var(--button-height);
-    font-size: var(--button-font-size);
-    background: var(--button-bg);
-    color: #fff;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    transition: all 0.2s ease;
-}
-
-button.service-btn:hover {
-    background: var(--button-hover-bg);
-    transform: translateY(-3px);
-}
-
-button.service-btn:active {
-    transform: translateY(0);
-}
-
-/* --- Неактивная услуга --- */
-button.service-btn.unavailable {
-    background: #b5b5b5;
-    cursor: not-allowed;
-    opacity: 0.85;
-    transform: none;
-}
-
-button.service-btn.unavailable:hover {
-    background: #b5b5b5;
-    transform: none;
-}
-
-/* --- Уведомление --- */
-#ticket-notice {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.6);
-    color: #fff;
-    font-size: 32px;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    flex-direction: column;
-    text-align: center;
-    z-index: 999;
-}
-
-#ticket-notice span {
-    background: var(--notice-bg);
-    padding: 25px 50px;
-    border-radius: 12px;
-    margin-bottom: 20px;
-}
-
-#ticket-notice .timer {
-    font-size: 22px;
-    font-weight: bold;
-}
-
-@media print {
-    body * { visibility: hidden; } /* Скрываем всё */
-    #print-receipt, #print-receipt * { visibility: visible; } /* Показываем только талон */
-    #print-receipt {
-        position: absolute;
-        left: 0;
-        top: 0;
-        width: 100% !important; /* Растягиваем на всю ширину ленты */
-        margin: 0;
-        padding: 0;
-    }
-    @page {
-        margin: 0; /* Убираем поля принтера (дату, заголовок страницы) */
-    }
-}
-</style>
+    <meta charset="UTF-8">
+    <title>Терминал очереди</title>
+    <link rel="stylesheet" href="/static/css/terminal.css">
 </head>
-
 <body>
 
-<audio id="silentAudio" loop>
-    <source src="https://raw.githubusercontent.com/anars/blank-audio/master/10-seconds-of-silence.mp3" type="audio/mp3">
-</audio>
+    <audio id="silentAudio" loop>
+        <source src="https://raw.githubusercontent.com/anars/blank-audio/master/10-seconds-of-silence.mp3" type="audio/mp3">
+    </audio>
 
-<h1>Выберите услугу</h1>
-
-<div id="services"></div>
-
-<div id="ticket-notice">
-    <span id="ticket-message"></span>
-    <div class="timer" id="ticket-timer"></div>
-</div>
-
-<script>
-function connectSocket() {
-    const socket = new WebSocket("ws://localhost:8000/ws/terminal");
-
-    socket.onopen = () => console.log("WS connected");
-
-    socket.onclose = () => {
-        console.log("WS reconnecting...");
-        setTimeout(connectSocket, 2000);
-    };
-
-    socket.onmessage = function(event) {
-        const data = JSON.parse(event.data);
-
-        if (data.type === "services_updated") {
-            loadServices();
-        }
-    };
-
-    return socket;
-}
-
-let socket = connectSocket();
-
-socket.onmessage = function(event) {
-    const data = JSON.parse(event.data);
-
-    if (data.type === "services_updated") {
-        loadServices();  // просто перезагружаем список
-    }
-};
-
-
-const API_URL = "http://localhost:8000";
-const NOTICE_DURATION = 5;
-
-// --- Загрузка услуг ---
-async function loadServices() {
-    try {
-        const res = await fetch(`${API_URL}/services/`);
-        const services = await res.json();
-
-        const container = document.getElementById("services");
-        container.innerHTML = "";
-
-        services.forEach(service => {
-            const btn = document.createElement("button");
-            btn.classList.add("service-btn");
-
-            if (service.status === "inactive") {
-                btn.textContent = `${service.name} (сейчас не активна)`;
-                btn.classList.add("unavailable");
-
-                // вместо блокировки просто показываем уведомление
-                btn.onclick = () => {
-                    showNotice("В данный момент нет доступных специалистов. Услуга недоступна", 5);
-                };
-            } else {
-                btn.textContent = service.name;
-                btn.onclick = () => createTicket(service.id, service.name);
-            }
-
-            container.appendChild(btn);
-        });
-
-    } catch (error) {
-        console.error("Ошибка загрузки услуг:", error);
-    }
-}
-
-// --- Создание талона ---
-async function createTicket(serviceId, serviceName) {
-    const buttons = document.querySelectorAll(".service-btn");
+    <h1>Выберите услугу</h1>
     
-    // Блокируем интерфейс на время обработки
-    buttons.forEach(btn => btn.disabled = true);
+    <div id="services">Загрузка услуг...</div>
 
-    try {
-        const response = await fetch(`${API_URL}/tickets/`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ service_id: serviceId })
-        });
-
-        const data = await response.json();
-
-        // Проверка на ошибки (404, 400 или кастомное поле error)
-        if (!response.ok || data.error) {
-            const errorMsg = data.detail || data.error || "Нет доступных специалистов";
-            showNotice(errorMsg, 3);
-            return; 
-        }
-
-        // 1. Наполняем талон данными из ответа бэкенда
-        document.getElementById("receipt-number").textContent = data.number;
-        document.getElementById("receipt-service").textContent = data.service_name || serviceName;
-        document.getElementById("receipt-date").textContent = data.date || new Date().toLocaleString();
-
-        // 2. Логика отображения очереди перед человеком
-        const waitEl = document.getElementById("receipt-wait-count");
-        if (waitEl) {
-            waitEl.textContent = data.waiting_before > 0 
-                ? `ПЕРЕД ВАМИ В ОЧЕРЕДИ: ~ ${data.waiting_before} ЧЕЛ.` 
-                : "ВЫ СЛЕДУЮЩИЙ В ОЧЕРЕДИ!";
-        }
-
-        // 3. Запускаем процесс печати через iframe или текущее окно
-        printTicket();
-        
-        // 4. Уведомляем другие модули через WebSocket
-        if (socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: "queue_updated" }));
-        }
-
-        // 5. Показываем финальное сообщение на экране терминала
-        showNotice(`Ваш номер: ${data.number}. Возьмите талон!`, NOTICE_DURATION);
-
-    } catch (error) {
-        console.error("Ошибка при создании билета:", error);
-        showNotice("Сбой связи с сервером. Обратитесь к администратору.", 4);
-    } finally {
-        // Разблокируем только те кнопки, которые не были принудительно выключены (статус inactive)
-        buttons.forEach(btn => {
-            if (!btn.classList.contains("unavailable")) {
-                btn.disabled = false;
-            }
-        });
-    }
-}
-
-function showNotice(message, duration) {
-    const notice = document.getElementById("ticket-notice");
-    const timerEl = document.getElementById("ticket-timer");
-    const messageEl = document.getElementById("ticket-message");
-
-    // Останавливаем предыдущие таймеры, если они были (защита от "двойного" клика)
-    if (window.noticeInterval) clearInterval(window.noticeInterval);
-
-    messageEl.textContent = message;
-    let secondsLeft = duration;
-    
-    timerEl.textContent = secondsLeft;
-    notice.style.display = "flex";
-
-    window.noticeInterval = setInterval(() => {
-        secondsLeft--;
-        timerEl.textContent = secondsLeft;
-
-        if (secondsLeft <= 0) {
-            clearInterval(window.noticeInterval);
-            notice.style.display = "none";
-        }
-    }, 1000);
-}
-
-function printTicket() {
-    const receipt = document.getElementById("print-receipt");
-    
-    // Делаем видимым для корректного захвата браузером
-    receipt.style.display = "block";
-
-    // Вызов системного диалога печати
-    // При правильно настроенном @media print напечатается только этот блок
-    window.print();
-
-    // Скрываем обратно
-    receipt.style.display = "none";
-}
-
-function printTicket() {
-    // Показываем блок для расчетов (но он будет виден только при печати из-за @media print)
-    const receipt = document.getElementById("print-receipt");
-    receipt.style.display = "block";
-
-    // Вызываем системную печать
-    window.print();
-
-    // Снова скрываем
-    receipt.style.display = "none";
-}
-
-
-// Запуск "тишины" для предотвращения сна
-// чтобы пинг постоянно шел и не закрывалось окно
-
-function startAntiSleepAudio() {
-    const audio = document.getElementById('silentAudio');
-    audio.play().then(() => {
-        console.log("Anti-sleep audio started");
-    }).catch(err => {
-        console.warn("Audio play blocked, waiting for user interaction");
-    });
-}
-
-// Запускаем при первом клике в любом месте страницы
-document.addEventListener('click', () => {
-    startAntiSleepAudio();
-}, { once: true });
-
-// --- Инициализация ---
-loadServices();
-</script>
-
-<div id="print-receipt" style="display: none; width: 280px; text-align: center; font-family: 'Arial Black', Gadget, sans-serif; color: #000; background: #fff; line-height: 1.2;">
-    <div style="border-top: 4px solid #000; margin-bottom: 10px;"></div>
-
-    <div style="font-size: 18px; font-weight: 900; text-transform: uppercase;">Приемная комиссия</div>
-    <div style="font-size: 20px; margin-bottom: 10px;">ВАШ НОМЕР</div>
-    
-    <div id="receipt-number" style="font-size: 100px; font-weight: 900; line-height: 0.9; margin: 5px 0; border: 5px solid #000; padding: 10px 0;"></div>
-    
-    <div id="receipt-service" style="font-size: 20px; font-weight: bold; margin: 10px 0; text-transform: uppercase;"></div>
-    
-    <div id="receipt-wait-count" style="font-size: 18px; font-weight: bold; margin: 10px 0; padding: 5px; border: 1px solid #000;"></div>
-
-    <div style="border-top: 2px dashed #000; margin: 15px 0;"></div>
-
-    <div style="font-size: 14px; text-align: left; font-family: Arial, sans-serif;">
-        <strong>ВНИМАНИЕ:</strong> После вызова на табло у вас есть <strong>5 минут</strong>, чтобы подойти к окну. Затем вызов будет аннулирован.
+    <div id="ticket-notice">
+        <span id="ticket-message"></span>
+        <div class="timer" id="ticket-timer"></div>
     </div>
 
-    <div id="receipt-date" style="font-size: 14px; margin-top: 15px; font-weight: normal;"></div>
-    
-    <div style="height: 80px;"></div> 
-</div>
+    <div id="print-receipt">
+        <div class="receipt-header-line"></div>
+        <div class="org-name">Приемная комиссия</div>
+        <div class="ticket-label">ВАШ НОМЕР</div>
+        <div id="receipt-number"></div>
+        <div id="receipt-service"></div>
+        <div id="receipt-wait-count"></div>
+        <div class="dashed-line"></div>
+        <div class="notice-text">
+            <strong>ВНИМАНИЕ:</strong> После вызова на табло у вас есть 5 минут...
+        </div>
+        <div id="receipt-date"></div>
+        <div class="footer-spacer"></div>
+    </div>
+
+    <script src="/static/js/config.js"></script>
+    <script src="/static/js/terminal.js"></script>
 </body>
 </html>

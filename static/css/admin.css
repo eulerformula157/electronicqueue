@@ -1,0 +1,60 @@
+/* static/css/admin.css */
+body { font-family: Arial; background: #f4f4f4; margin: 0; }
+
+header {
+    background: #1490a3;
+    color: white;
+    padding: 15px;
+    font-size: 20px;
+}
+
+.tabs { display: flex; background: #ddd; }
+
+.tabs button {
+    padding: 12px 20px;
+    border: none;
+    background: #ddd;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+.tabs button:hover, .tabs button.active {
+    background: #1490a3;
+    color: white;
+}
+
+#tab-exit:hover {
+    background: #a31414 !important;
+    color: white;
+}
+
+.sticky-header {
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    background: #f4f4f4;
+}
+
+.content { padding: 20px; }
+
+table {
+    border-collapse: collapse;
+    width: 100%;
+    background: white;
+}
+
+th, td {
+    border: 1px solid #ddd;
+    padding: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+button {
+    padding: 6px 12px;
+    cursor: pointer;
+}
+
+.form { margin-bottom: 20px; background: white; padding: 15px; border-radius: 4px; }
+.servicesBox, .servicesBoxServices { background: #fff; padding: 10px; border: 1px solid #ccc; margin-top: 5px; }

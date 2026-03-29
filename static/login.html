@@ -1,73 +1,9 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8">
-<title>Вход в систему</title>
-<style>
-body {
-    margin: 0;
-    padding: 0;
-    font-family: Arial, sans-serif;
-    background: #fff;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 100vh;
-}
-
-/* Контейнер формы */
-.login-box {
-    background: #f2f2f2;   /* светло-серый прямоугольник */
-    padding: 40px 30px;
-    border-radius: 10px;
-    box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-    text-align: center;
-    width: 350px;
-}
-
-/* Заголовок */
-.login-box h2 {
-    margin: 0 0 30px 0;
-    color: #333;
-    font-size: 20px;
-}
-
-/* Поля ввода */
-.login-box input[type="text"],
-.login-box input[type="password"] {
-    width: 100%;
-    padding: 12px;
-    margin-bottom: 20px;
-    border: 1px solid #ccc;
-    border-radius: 6px;
-    font-size: 16px;
-    box-sizing: border-box;
-}
-
-/* Кнопка */
-.login-box button {
-    width: 100%;
-    padding: 12px;
-    background: #e05d1b;
-    color: white;
-    font-size: 18px;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: background 0.3s;
-}
-
-.login-box button:hover {
-    background: #1490a3;
-}
-
-/* Сообщение об ошибке */
-#login-error {
-    color: red;
-    margin-top: 10px;
-    font-size: 14px;
-}
-</style>
+    <meta charset="UTF-8">
+    <title>Вход в систему</title>
+    <link rel="stylesheet" href="/static/css/login.css">
 </head>
 <body>
 
@@ -75,48 +11,12 @@ body {
     <h2>Вход в СУО Приемной комиссии</h2>
     <input type="text" id="login" placeholder="Логин">
     <input type="password" id="password" placeholder="Пароль">
-    <button onclick="submitLogin()">Войти</button>
+    <button id="login-btn">Войти</button>
     <div id="login-error"></div>
 </div>
 
-<script>
-const API_URL = "http://localhost:8000";
-
-async function submitLogin() {
-    const login = document.getElementById("login").value;
-    const password = document.getElementById("password").value;
-    const errorDiv = document.getElementById("login-error");
-
-    errorDiv.textContent = "";
-
-    try {
-        const response = await fetch(`${API_URL}/login`, {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({login, password})
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            throw new Error(data.detail || "Ошибка входа");
-        }
-
-        // Сохраняем сессию
-        sessionStorage.setItem("session_id", data.session_id);
-
-        // Перенаправляем в зависимости от роли
-        if (data.role === "admin") {
-            window.location.href = "/static/admin.html";
-        } else {
-            window.location.href = "/static/operator.html";
-        }
-
-    } catch (err) {
-        errorDiv.textContent = err.message;
-    }
-}
-</script>
+<script src="/static/js/config.js"></script>
+<script src="/static/js/login.js"></script>
 
 </body>
 </html>

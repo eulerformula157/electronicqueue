@@ -1,0 +1,131 @@
+/* Содержимое файла terminal.css */
+
+/* --- Константы --- */
+:root {
+    --button-height: 140px;
+    --button-width: 300px;
+    --button-font-size: 18px;
+    --button-gap: 20px;
+    --main-bg: #f4f6f8;
+    --button-bg: #e05d1b;
+    --button-hover-bg: #1490a3;
+    --text-color: #333;
+    --notice-bg: #333;
+}
+
+/* --- Страница --- */
+body {
+    margin: 0;
+    padding: 40px 20px;
+    font-family: Arial, sans-serif;
+    text-align: center;
+    background: var(--main-bg);
+    min-height: 100vh;
+    box-sizing: border-box;
+}
+
+h1 {
+    margin-bottom: 40px;
+    color: var(--text-color);
+    font-size: 38px;
+}
+
+/* --- Контейнер кнопок --- */
+#services {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: var(--button-gap);
+    max-width: 1000px;
+    margin: 0 auto 30px auto;
+}
+
+/* --- Кнопки --- */
+button.service-btn {
+    width: var(--button-width);
+    height: var(--button-height);
+    font-size: var(--button-font-size);
+    background: var(--button-bg);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    transition: all 0.2s ease;
+}
+
+button.service-btn:hover {
+    background: var(--button-hover-bg);
+    transform: translateY(-3px);
+}
+
+button.service-btn:active {
+    transform: translateY(0);
+}
+
+/* --- Неактивная услуга --- */
+button.service-btn.unavailable {
+    background: #b5b5b5;
+    cursor: not-allowed;
+    opacity: 0.85;
+    transform: none;
+}
+
+button.service-btn.unavailable:hover {
+    background: #b5b5b5;
+    transform: none;
+}
+
+/* --- Уведомление --- */
+#ticket-notice {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    color: #fff;
+    font-size: 32px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    text-align: center;
+    z-index: 999;
+}
+
+#ticket-notice span {
+    background: var(--notice-bg);
+    padding: 25px 50px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+}
+
+#ticket-notice .timer {
+    font-size: 22px;
+    font-weight: bold;
+}
+
+/* --- Чек (для экрана) --- */
+#print-receipt {
+    display: none; /* СКРЫВАЕМ С ЭКРАНА ПО УМОЛЧАНИЮ */
+    /* Дополнительные стили для блока чека, если они нужны на экране при отладке */
+}
+
+/* --- Стили для печати --- */
+@media print {
+    body * { visibility: hidden; } /* Скрываем всё */
+    #print-receipt, #print-receipt * { visibility: visible; } /* Показываем только талон */
+    #print-receipt {
+        display: block !important; /* ОБЯЗАТЕЛЬНО ПОКАЗЫВАЕМ ПРИ ПЕЧАТИ */
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100% !important; /* Растягиваем на всю ширину ленты */
+        margin: 0;
+        padding: 0;
+    }
+    @page {
+        margin: 0; /* Убираем поля принтера (дату, заголовок страницы) */
+    }
+}
