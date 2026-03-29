@@ -701,12 +701,12 @@ async def redirect_ticket(data: RedirectRequest, operator: Operator = Depends(ve
     finally:
         db.close()
 
-@app.get("/tickets/", tags=["Tickets"])
-def list_tickets():
-    db = SessionLocal()
-    tickets = db.query(Ticket).all()
-    db.close()
-    return tickets
+#@app.get("/tickets/", tags=["Tickets"])
+#def list_tickets():
+#    db = SessionLocal()
+#    tickets = db.query(Ticket).all()
+#    db.close()
+#    return tickets
     
 @app.post("/tickets/recall", tags=["Tickets"])
 async def recall_ticket(operator: Operator = Depends(verify_session)):
@@ -886,7 +886,7 @@ def get_window_services(window_id: int, admin: Admin = Depends(verify_admin_sess
     db.close()
     return services
 
-@app.put("/window-services/{window_id}")
+@app.put("/window-services/{window_id}", tags=["Windows"])
 async def update_window_services(
     window_id: int, 
     data: WindowServicesUpdate, # Он ждет {"services": [...]}
@@ -1412,7 +1412,7 @@ async def get_my_details(operator: Operator = Depends(verify_session)):
     finally:
         db.close()
 
-@app.post("/ping")
+@app.post("/ping", tags=["Auth"])
 async def ping(data: PingRequest): # FastAPI автоматически распарсит JSON в эту модель
     db = SessionLocal()
     try:
@@ -1426,7 +1426,7 @@ async def ping(data: PingRequest): # FastAPI автоматически расп
     finally:
         db.close()
 
-@app.patch("/window-services/priority")
+@app.patch("/window-services/priority", tags=["Windows"])
 async def update_priority(data: PriorityUpdate, admin: Admin = Depends(verify_admin_session)):
     db = SessionLocal()
     ws = db.query(WindowService).filter(
