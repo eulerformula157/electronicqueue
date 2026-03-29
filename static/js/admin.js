@@ -87,7 +87,16 @@ document.getElementById("form").innerHTML=html
 
 
 async function loadServices() {
-	setActiveTab('tab-services'); // <-- Добавьте эту строку
+	// Показываем форму и таблицу обратно
+    document.getElementById("form").style.display = "block";
+    document.getElementById("table").style.display = "table";
+    
+    // Удаляем блок статистики, чтобы он не мешал
+    const statsContainer = document.getElementById("stats-container");
+    if (statsContainer) statsContainer.remove();
+	
+	
+	setActiveTab('tab-services'); 
     // 1. Берем ID сессии из хранилища браузера
     const sessionId = sessionStorage.getItem("session_id");
 
@@ -319,6 +328,14 @@ async function addService() {
 ////////////////////////////////////////
 
 async function loadWindows() {
+	// Показываем форму и таблицу обратно
+    document.getElementById("form").style.display = "block";
+    document.getElementById("table").style.display = "table";
+    
+    // Удаляем блок статистики, чтобы он не мешал
+    const statsContainer = document.getElementById("stats-container");
+    if (statsContainer) statsContainer.remove();	
+	
 	setActiveTab('tab-windows');
     windows = await fetchJSON(`${API}/windows/`);
 
@@ -338,7 +355,7 @@ async function loadWindows() {
             <td>
                 <button onclick="editWindow(${w.id},'${w.name}')">Название</button>
                 <button onclick="editWindowStatus(${w.id}, '${w.status}')">Статус</button>
-				<button class="btn-edit" onclick="editServices(${w.id})">Услуги</button>
+				<button onclick="editServices(${w.id})">Услуги</button>
                 <button style="background: #ffcccc;" onclick="deleteWindow(${w.id})">Удалить</button>
             </td>
         </tr>`;
@@ -518,7 +535,15 @@ return w?w.name:"-"
 ////////////////////////////////////////
 
 async function loadOperators(){
-    setActiveTab('tab-operators');
+	// Показываем форму и таблицу обратно
+    document.getElementById("form").style.display = "block";
+    document.getElementById("table").style.display = "table";
+    
+    // Удаляем блок статистики, чтобы он не мешал
+    const statsContainer = document.getElementById("stats-container");
+    if (statsContainer) statsContainer.remove();	
+
+	setActiveTab('tab-operators');
     // fetchJSON сам подставит session-id и выкинет на логин при ошибке 401
     windows = await fetchJSON(`${API}/windows/`);
     operators = await fetchJSON(`${API}/operators/`);
@@ -922,27 +947,35 @@ async function saveLoginPassword(operator_id) {
 
     loadOperators();
 }
+
 function loadStats() {
-setActiveTab('tab-stats');
-    // 1. Очищаем форму
-    setForm(""); 
+    const content = document.querySelector(".content");
+    const form = document.getElementById("form");
+    const table = document.getElementById("table");
+
+    // 1. Скрываем стандартные блоки формы и таблицы
+    if (form) form.style.display = "none";
+    if (table) table.style.display = "none";
+
+    // 2. Удаляем старое окно статистики, если оно уже было создано ранее
+    const oldStats = document.getElementById("stats-container");
+    if (oldStats) oldStats.remove();
+
+    // 3. Создаем новый контейнер для статистики
+    const statsContainer = document.createElement("div");
+    statsContainer.id = "stats-container";
     
-    // 2. Вставляем iframe с дашбордом Grafana
-    // Замените URL на ваш адрес дашборда
-    const grafanaUrl = GRAFANA;
-    
-    const html = `
-        <div style="width: 100%; height: 800px; background: white; padding: 10px;">
-            <iframe 
-                src="${grafanaUrl}" 
-                width="100%" 
-                height="100%" 
-                frameborder="0">
-            </iframe>
-        </div>
+    // Добавляем заголовок и iframe
+    statsContainer.innerHTML = `
+        <iframe src="${GRAFANA}" 
+                style="width:100%; height:840px; border:none; border-radius:16px; box-shadow:var(--shadow);">
+        </iframe>
     `;
     
-    setTable(html);
+    content.appendChild(statsContainer);
+    
+    // Подсветка таба (если у вас есть функция setActiveTab)
+    setActiveTab('tab-stats');
 }
 
 function setActiveTab(tabId) {

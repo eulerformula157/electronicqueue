@@ -82,9 +82,24 @@ async function createTicket(serviceId, serviceName) {
             return; 
         }
 
+
+		// Настройка форматирования даты
+		const dateOptions = { 
+			weekday: 'long', 
+			day: 'numeric', 
+			month: 'long', 
+			year: 'numeric', 
+			hour: '2-digit', 
+			minute: '2-digit', 
+			second: '2-digit' 
+		};
+
+		// Формируем строку даты (например: воскресенье, 29 марта 2026 г., 08:15:00)
+		const formattedDate = new Date().toLocaleString('ru-RU', dateOptions).replace(' г.', 'г.');
+
         document.getElementById("receipt-number").textContent = data.number;
         document.getElementById("receipt-service").textContent = data.service_name || serviceName;
-        document.getElementById("receipt-date").textContent = data.date || new Date().toLocaleString();
+        document.getElementById("receipt-date").textContent = formattedDate;
 
         const waitEl = document.getElementById("receipt-wait-count");
         if (waitEl) {
