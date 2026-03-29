@@ -140,7 +140,7 @@ from fastapi.staticfiles import StaticFiles
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
-# ------------------ Модели SQLAlchemy ------------------
+# ------------------ Модели SQLAlchemy и Pydantic схемы ------------------
 
 class Service(Base):
     __tablename__ = "services"
@@ -222,7 +222,6 @@ class CallSpecificRequest(BaseModel):
 
 class PingRequest(BaseModel):
     session_id: str
-# ------------------ Pydantic схемы ------------------
 
 class ServiceCreate(BaseModel):
     name: str
@@ -276,6 +275,7 @@ class WindowServiceItem(BaseModel):
 
 class WindowServicesUpdate(BaseModel):
     services: List[WindowServiceItem]
+
 # ------------------ Эндпоинты ------------------
 
 @app.post("/services/", tags=["Services"])
@@ -289,6 +289,7 @@ async def create_service(service: ServiceCreate, admin: Admin = Depends(verify_a
     })    
         
     db.commit()
+    await manager.broadcast({"type": "services_updated"})
     db.refresh(db_service)
     db.close()
     return db_service
@@ -784,7 +785,7 @@ async def update_window_status(window_id: int, data: WindowStatusUpdate = Body(.
         db.close()
 
 @app.post("/window-services/", tags=["Windows"])
-def create_window_service(data: WindowServiceCreate, admin: Admin = Depends(verify_admin_session)):
+async def create_window_service(data: WindowServiceCreate, admin: Admin = Depends(verify_admin_session)):
     db = SessionLocal()
 
     existing = db.query(WindowService).filter_by(
@@ -800,7 +801,8 @@ def create_window_service(data: WindowServiceCreate, admin: Admin = Depends(veri
         window_id=data.window_id,
         service_id=data.service_id
     )
-
+    
+    await manager.broadcast({"type": "services_updated"})
     db.add(ws)
     db.commit()
     db.refresh(ws)
@@ -849,6 +851,7 @@ async def update_window_services(
             db.add(new_ws)
         
         db.commit()
+        await manager.broadcast({"type": "services_updated"})
         return {"status": "ok"}
     except Exception as e:
         db.rollback()
@@ -857,7 +860,7 @@ async def update_window_services(
         db.close()
 
 @app.delete("/window-services/{window_id}/{service_id}", tags=["Windows"])
-def delete_window_service(window_id: int, service_id: int, admin: Admin = Depends(verify_admin_session)):
+async def delete_window_service(window_id: int, service_id: int, admin: Admin = Depends(verify_admin_session)):
 
     db = SessionLocal()
 
@@ -873,7 +876,8 @@ def delete_window_service(window_id: int, service_id: int, admin: Admin = Depend
     if ws:
         db.delete(ws)
         db.commit()
-
+                
+    await manager.broadcast({"type": "services_updated"})
     db.close()
 
     return {"status":"ok"}
@@ -1113,7 +1117,7 @@ def delete_window(window_id: int, admin: Admin = Depends(verify_admin_session)):
     return {"message": "Window deleted"}
  
 @app.patch("/windows/{window_id}", tags=["Windows"])
-def rename_window(window_id: int, data: WindowCreate, admin: Admin = Depends(verify_admin_session)):
+async def rename_window(window_id: int, data: WindowCreate, admin: Admin = Depends(verify_admin_session)):
     db = SessionLocal()
     window = db.query(Window).filter(Window.id == window_id).first()
     if not window:
@@ -1122,6 +1126,7 @@ def rename_window(window_id: int, data: WindowCreate, admin: Admin = Depends(ver
     window.name = data.name
     db.commit()
     db.refresh(window)
+    await manager.broadcast({"type": "services_updated"})
     db.close()
     return window
  
@@ -1139,7 +1144,7 @@ async def delete_operator(operator_id: int, admin: Admin = Depends(verify_admin_
     
    
 @app.patch("/operators/{operator_id}", tags=["Operators"])
-def update_operator(operator_id: int, data: dict):
+async def update_operator(operator_id: int, data: dict):
 
     db = SessionLocal()
 
@@ -1172,6 +1177,8 @@ def update_operator(operator_id: int, data: dict):
 
         op.window_id = new_window
 
+
+    await manager.broadcast({"type": "services_updated"})
     db.commit()
     db.refresh(op)
     db.close()
@@ -1513,6 +1520,7 @@ async def update_priority(data: PriorityUpdate, admin: Admin = Depends(verify_ad
     if ws:
         ws.priority = data.priority
         db.commit()
+    await manager.broadcast({"type": "services_updated"})
     db.close()
     return {"status": "updated"}
 
