@@ -480,6 +480,11 @@ async def call_next_ticket(operator: Operator = Depends(verify_session)):
         ticket.window_id = operator.window_id
         ticket.called_at = text("CURRENT_TIMESTAMP")
 
+        await manager.broadcast({
+            "type": "queue_updated"
+        })    
+
+
         asyncio.create_task(broadcast_board())
 
         db.commit()

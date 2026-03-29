@@ -330,6 +330,10 @@ async function confirmRedirect() {
     }
 }
 
+function cancelRedirect() {
+    document.getElementById("redirect-panel").style.display = "none";
+}
+
 async function changeWindowStatus(newStatus) {
     try {
         const sessionId = sessionStorage.getItem("session_id");
