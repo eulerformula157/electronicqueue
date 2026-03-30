@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Вход в систему</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="/queue/css/login.css">
+</head>
+<body>
+
+<div class="login-box">
+    <h2>Вход в СУО приемной комиссии</h2>
+
+	<div id="keyboard-warning" class="keyboard-warning"></div>
+
+    <form id="login-form" onsubmit="return false;">
+        <input type="text" id="login" placeholder="Логин" required autocomplete="username">
+		<div class="password-wrapper">
+			<input type="password" id="password" placeholder="Пароль" required autocomplete="current-password">
+			<button type="button" id="toggle-password">👁</button>
+		</div>
+
+        <button type="submit" id="login-btn">Войти</button>
+    </form>
+    <div id="login-error"></div>
+</div>
+
+<script src="/queue/js/config.js"></script>
+<script src="/queue/js/login.js"></script>
+
+</body>
+</html>

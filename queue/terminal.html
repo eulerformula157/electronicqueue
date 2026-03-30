@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Терминал очереди</title>
+    <link rel="stylesheet" href="/queue/css/terminal.css?v=1.1">
+	
+<style>
+        /* Стили только для таллона, почему-то через terminal.css не хочет работать */
+        #print-receipt {
+            display: none; /* Скрыт на экране терминала */
+            width: 280px;
+            text-align: center;
+            font-family: 'Arial Black', Gadget, sans-serif;
+            color: #000 !important;
+            background: #fff !important;
+            line-height: 1.2;
+            padding: 10px;
+        }
+
+        .receipt-header-line {
+            border-top: 4px solid #000 !important; 
+            margin-bottom: 10px;
+        }
+
+        .org-name {
+            font-size: 18px; 
+            font-weight: 900; 
+            text-transform: uppercase;
+        }
+
+        .ticket-label {
+            font-size: 20px; 
+            margin-bottom: 10px;
+        }
+
+        #receipt-number {
+            font-size: 100px; 
+            font-weight: 900; 
+            line-height: 0.9; 
+            margin: 5px 0; 
+            border: 5px solid #000 !important; 
+            padding: 10px 0;
+        }
+
+        #receipt-service {
+            font-size: 20px; 
+            font-weight: bold; 
+            margin: 10px 0; 
+            text-transform: uppercase;
+        }
+
+        #receipt-wait-count {
+            font-size: 18px; 
+            font-weight: bold; 
+            margin: 10px 0; 
+            padding: 5px; 
+            border: 1px solid #000 !important;
+        }
+
+        .dashed-line {
+            border-top: 2px dashed #000 !important; 
+            margin: 15px 0;
+        }
+
+        .notice-text {
+            font-size: 14px; 
+            text-align: left; 
+            font-family: Arial, sans-serif;
+        }
+
+        #receipt-date {
+            font-size: 14px; 
+            margin-top: 15px;
+        }
+
+        .footer-spacer {
+            height: 100px;
+        }
+
+        /* Специфические правила для вывода на принтер */
+        @media print {
+            body * { 
+                visibility: hidden !important; 
+            }
+            #print-receipt, #print-receipt * { 
+                visibility: visible !important; 
+            }
+            #print-receipt {
+                display: block !important; /* Гарантируем появление блока при печати */
+                position: absolute;
+                left: 45px;
+                top: 0;
+                width: 80% !important;
+                margin: 0;
+                padding: 0;
+            }
+            @page {
+                margin: 0;
+            }
+        }
+</style>	
+	
+</head>
+<body>
+
+    <audio id="silentAudio" loop>
+        <source src="https://raw.githubusercontent.com/anars/blank-audio/master/10-seconds-of-silence.mp3" type="audio/mp3">
+    </audio>
+
+    <h1>Выберите услугу</h1>
+    
+    <div id="services">Загрузка услуг...</div>
+
+    <div id="ticket-notice">
+        <span id="ticket-message"></span>
+        <div class="timer" id="ticket-timer"></div>
+    </div>
+
+    <div id="print-receipt">
+        <div class="receipt-header-line"></div>
+        <div class="org-name">Приемная комиссия</div>
+        <div class="ticket-label">ВАШ НОМЕР</div>
+        <div id="receipt-number"></div>
+        <div id="receipt-service"></div>
+        <div id="receipt-wait-count"></div>
+        <div class="dashed-line"></div>
+        <div class="notice-text">
+            <strong>ВНИМАНИЕ:</strong> После вызова на табло у вас есть 5 минут...
+        </div>
+        <div id="receipt-date"></div>
+        <div class="footer-spacer"></div>
+    </div>
+
+    <script src="/queue/js/config.js"></script>
+    <script src="/queue/js/terminal.js"></script>
+</body>
+</html>

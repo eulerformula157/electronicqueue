@@ -43,14 +43,14 @@ app = FastAPI()
 
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        self.active_connections: Set[WebSocket] = set()
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        self.active_connections.append(websocket)
+        self.active_connections.add(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        self.active_connections.discard(websocket)
 
     async def broadcast(self, message: dict):
         dead = []
@@ -146,7 +146,7 @@ app.add_middleware(
 # чтобы заработали мои html
 
 from fastapi.staticfiles import StaticFiles
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/queue", StaticFiles(directory="queue"), name="queue")
 
 
 # ------------------ Модели SQLAlchemy и Pydantic схемы ------------------

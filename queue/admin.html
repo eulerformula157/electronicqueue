@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Управление Очередью</title>
+    <link rel="stylesheet" href="/queue/css/admin.css">
+</head>
+<body>
+
+<div class="sticky-header">
+    <header>Управление Очередью</header>
+    <div class="tabs">
+        <button id="tab-services" onclick="loadServices()">Услуги</button>
+        <button id="tab-windows" onclick="loadWindows()">Окна</button>
+        <button id="tab-operators" onclick="loadOperators()">Операторы</button>
+        <button id="tab-stats" onclick="loadStats()">Статистика</button>
+        <button id="tab-exit" onclick="ExitPage()">Выйти</button>
+    </div>
+</div>
+
+<div class="content">
+    <div id="form"></div>
+    <table id="table"></table>
+</div>
+
+<script src="/queue/js/config.js"></script>
+<script src="/queue/js/admin.js"></script>
+
+</body>
+</html>

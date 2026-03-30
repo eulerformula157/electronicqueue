@@ -1,0 +1,161 @@
+/* --- Переменные из operator.css --- */
+:root {
+    --primary: #003366;          /* Глубокий синий */
+    --primary-hover: #004080;
+    --accent: #00aaff;           /* Голубой акцентный */    
+    --success: #28a745;          /* Зеленый */
+    --danger: #dc3545;           /* Красный */
+    --bg: #f4f7f9;               /* Светло-серый фон страницы */
+    --card-bg: #ffffff;
+    --text-main: #002244;        /* Темно-синий для текста */
+    --text-muted: #6c757d;       /* Серый текст */
+    --shadow: 0 4px 12px rgba(0, 51, 102, 0.08);
+}
+
+body {
+    margin: 0;
+    font-family: 'Inter', -apple-system, sans-serif;
+    background-color: var(--bg);
+    color: var(--text-main);
+}
+
+/* --- Липкая шапка (Sticky Header) --- */
+.sticky-header {
+    background: var(--card-bg);
+    padding: 0.8rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: var(--shadow);
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+}
+
+header {
+    color: var(--primary);
+    font-weight: 800;
+    font-size: 1.2rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* --- Табы (Навигация) --- */
+.tabs {
+    display: flex;
+    gap: 8px;
+    background: transparent;
+}
+
+.tabs button {
+    background: transparent;
+    color: var(--text-muted);
+    border: none;
+    padding: 10px 18px;
+    border-radius: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 0.9rem;
+}
+
+.tabs button:hover {
+    background: #f1f5f9;
+    color: var(--primary);
+}
+
+.tabs button.active {
+    background: var(--primary);
+    color: white;
+}
+
+#tab-exit {
+    color: var(--danger);
+}
+
+#tab-exit:hover {
+    background: #fff1f0 !important;
+    color: var(--danger) !important;
+}
+
+/* --- Контентная область --- */
+.content {
+    margin: 30px auto;
+    padding: 0 20px;
+}
+
+/* Стилизация форм и таблиц под glass-card */
+#form, table {
+    background: var(--card-bg);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    margin-bottom: 30px;
+    overflow: hidden; /* Чтобы скругления работали */
+}
+
+#form {
+    padding: 25px;
+}
+
+/* --- Таблицы --- */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    border: none;
+}
+
+th {
+    background: #f8fafc;
+    color: var(--primary);
+    text-align: left;
+    text-transform: uppercase;
+    font-size: 0.8rem;
+    font-weight: 700;
+    padding: 16px;
+    border-bottom: 2px solid #edf2f7;
+}
+
+td {
+    padding: 14px 16px;
+    border-bottom: 1px solid #edf2f7;
+    font-size: 0.95rem;
+}
+
+tr:last-child td {
+    border-bottom: none;
+}
+
+tr:hover td {
+    background-color: #f8fbff;
+}
+
+/* --- Кнопки внутри контента --- */
+button:not(.tabs button) {
+    border: none;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+/* Цвета кнопок (для JS-динамики) */
+.btn-edit { background: var(--accent); color: white; margin-right: 5px; }
+.btn-delete { background: var(--danger); color: white; }
+.btn-add { background: var(--success); color: white; margin-top: 10px; }
+
+/* --- Поля ввода в формах --- */
+input, select {
+    padding: 10px 14px;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    font-family: inherit;
+    margin-right: 10px;
+    margin-bottom: 10px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+input:focus {
+    border-color: var(--accent);
+}
