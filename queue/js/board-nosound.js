@@ -19,6 +19,7 @@ let isVisualProcessing = false;
 document.addEventListener("DOMContentLoaded", () => {
     connectWS();
     updateClock();
+    setInterval(updateClock, 1000);
 });
 
 function connectWS() {

@@ -298,7 +298,6 @@ async def create_service(service: ServiceCreate, admin: Admin = Depends(verify_a
     })    
         
     db.commit()
-    await manager.broadcast({"type": "services_updated"})
     db.refresh(db_service)
     db.close()
     return db_service

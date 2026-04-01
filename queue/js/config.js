@@ -5,5 +5,6 @@ const CONFIG = {
     WS_BOARD_URL: "ws://localhost:8000/ws/board",
     NOTICE_DURATION: 5,
     RECONNECT_INTERVAL: 2000,
-	GRAFANA_URL: "http://localhost:3000/goto/afg7a2bkgdce8a?orgId=1&panelId=1"
+	GRAFANA_URL: "http://localhost:3000/goto/afg7a2bkgdce8a?orgId=1&panelId=1",
+	MEDIA_IDLE_DELAY: 15
 };
