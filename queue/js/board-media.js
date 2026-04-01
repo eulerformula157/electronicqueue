@@ -12,9 +12,6 @@ let currentPage = 0;
 let pages = [];
 let pageTimer = null;
 
-let queue = [];
-let audioPlaying = false;
-let isSpeakingNow = false;
 
 document.addEventListener("DOMContentLoaded", () => {
     connectWS();
@@ -51,7 +48,12 @@ updateClock();
 /* ================= MESSAGE ================= */
 
 function handleMessage(event) {
-    const data = JSON.parse(event.data);
+	const data = JSON.parse(event.data);
+	
+	if (data.type === "playlist_updated") {
+        console.log("Received playlist update signal");
+        initPlaylist(true); 
+    }
     
     const getCleanId = (t) => String(t.id || t.ticket_id || t.ticket_number || t.number);
 
@@ -60,7 +62,7 @@ function handleMessage(event) {
         const now = Date.now();
         
         // 1. Уже ждет в очереди на озвучку?
-        if (queue.some(t => getCleanId(t) === ticketId)) return true;
+        //if (queue.some(t => getCleanId(t) === ticketId)) return true;
         
         // 2. Озвучивается прямо сейчас?
         if (currentlyCallingId && String(currentlyCallingId) === ticketId) return true;
@@ -75,13 +77,34 @@ function handleMessage(event) {
 
 	const addTicket = (ticket) => {
 		const ticketId = getCleanId(ticket);
+
 		if (!isDuplicate(ticket)) {
 			console.log(`Добавлен: ${ticket.number}`);
 			processedTickets.set(ticketId, Date.now());
 
-			queue.push(ticket);
+		speakTicket(ticket, (id, isActive) => {
+			const video = document.getElementById('media-video');
 
-			if (!audioPlaying) processQueue();
+			if (isActive) {
+				highlightTickets.clear();
+				highlightTickets.add(id);
+				currentlyCallingId = id;
+
+				// приглушаем видео
+				if (video) video.volume = 0.2;
+
+			} else {
+				highlightTickets.delete(id);
+				currentlyCallingId = null;
+
+				// возвращаем звук (с задержкой, чтобы не дёргался)
+				setTimeout(() => {
+					if (video) video.volume = 1.0;
+				}, 6000);
+			}
+
+			renderPage();
+		});
 		}
 	};
 
@@ -180,7 +203,7 @@ function renderPage() {
         }
 
         // Обновляем класс calling
-        if (highlightTickets.has(t.id) || (currentlyCallingId === t.id && isSpeakingNow)) {
+        if (highlightTickets.has(t.id)) {
             card.classList.add("calling");
         } else {
             card.classList.remove("calling");
@@ -216,139 +239,78 @@ function updateTitle(){
         : "Табло очереди Приемной комиссии";
 }
 
-/* ================= VOICE ================= */
-
-function speakTicket(ticket) {
-    // Добавляем все талоны, без фильтра уникальности
-    queue.push(ticket);
-    
-    if (!audioPlaying) {
-        processQueue();
-    }
-    console.log("Текущая очередь:", queue.map(t => `${t.window_name}-${t.number}`).join(", "));
-}
-
-// board-media.js - Update this function
-async function processQueue() {
-    const video = document.getElementById('media-video');
-
-    if (queue.length === 0) {
-        audioPlaying = false;
-        currentlyCallingId = null;
-        
-        // Increase this delay (e.g., 2000ms) to keep the video quiet 
-        // for 2 seconds after the last ticket is finished
-        setTimeout(() => {
-            if (video) video.volume = 1.0; 
-        }, 2000); 
-
-        renderPage();
-        return;
-    }
-
-    audioPlaying = true;
-    if (video) video.volume = 0.2; 
-
-    const ticket = queue.shift();
-    currentlyCallingId = ticket.id;
-
-    try {
-        await speakText(`Талон ${ticket.number}. Подойдите к окну ${ticket.window_name}.`, ticket.id);
-    } catch (e) {
-        console.error("Ошибка синтеза:", e);
-    } finally {
-        currentlyCallingId = null;
-        renderPage();
-        
-        // This delay controls the pause between multiple tickets in the queue.
-        setTimeout(processQueue, 1000); 
-    }
-}
-
-function speakText(text, ticketId) {
-    return new Promise(async (resolve) => {
-        for (let i = 0; i < SPEAK_REPEAT_COUNT; i++) {
-            await speakOnce(text, ticketId);
-        }
-        resolve();
-    });
-}
-
-function speakOnce(text, ticketId) {
-    return new Promise((resolve) => {
-        const utterance = new SpeechSynthesisUtterance(text);
-
-        let voices = window.speechSynthesis.getVoices();
-        utterance.voice = voices.find(v => v.lang === 'ru-RU' && v.name.includes('Google')) ||
-                          voices.find(v => v.lang === 'ru-RU') ||
-                          voices[0];
-
-        utterance.lang = 'ru-RU';
-        utterance.rate = 0.85;
-        utterance.pitch = 1.0;
-
-        let finished = false;
-
-        const done = () => {
-            if (finished) return;
-            finished = true;
-            isSpeakingNow = false;
-            highlightTickets.delete(ticketId); // снимаем подсветку
-            renderPage();
-            resolve();
-        };
-
-        utterance.onstart = () => {
-            isSpeakingNow = true;
-
-            highlightTickets.clear();       // подсвечиваем только этот билет
-            highlightTickets.add(ticketId);
-
-            renderPage();
-        };
-
-        utterance.onend = done;
-        utterance.onerror = done;
-
-        // fallback на случай, если onend не сработает
-        const estimatedTime = Math.max(2000, text.length * 80);
-        setTimeout(done, estimatedTime);
-
-        window.speechSynthesis.speak(utterance);
-    });
-}
 
 /* ================= VIDEO ================= */
 
+let currentPlaylist = []; 
 let playlistIndex = 0;
 
-async function initPlaylist() {
+async function initPlaylist(isUpdate = false) {
     const video = document.getElementById('media-video');
-    
-    try {
-        // Fetch the external JSON file
-        const response = await fetch('/queue/media/playlist.json');
-        const playlist = await response.json();
+    if (!video) return;
 
-        if (!playlist || playlist.length === 0) return;
-
-        // Set the first video
-        video.src = playlist[0];
-        
-        video.play().catch(error => {
-            console.warn("Autoplay blocked. Click to start.");
-            document.addEventListener('click', () => video.play(), { once: true });
-        });
-
+    // 2. Add the 'ended' listener ONLY ONCE
+    if (!video.dataset.listenerAttached) {
         video.addEventListener('ended', () => {
-            playlistIndex = (playlistIndex + 1) % playlist.length;
-            video.src = playlist[playlistIndex];
-            video.play();
+            console.log("Video ended. Moving to next...");
+            if (currentPlaylist.length === 0) return;
+            
+            // Increment index and loop back to 0 if at the end
+            playlistIndex = (playlistIndex + 1) % currentPlaylist.length;
+            
+            console.log("Playing next:", currentPlaylist[playlistIndex]);
+            video.src = currentPlaylist[playlistIndex];
+            video.play().catch(e => console.warn("Playback failed:", e));
         });
-
-    } catch (error) {
-        console.error("Could not load playlist.json:", error);
+        video.dataset.listenerAttached = "true";
     }
+
+	try {
+		const response = await fetch('/queue/media/playlist.json?t=' + Date.now());
+		const data = await response.json();
+
+		const newPlaylist = Array.isArray(data) ? data : [];
+
+		if (newPlaylist.length === 0) {
+			currentPlaylist = [];
+			video.src = "";
+			return;
+		}
+
+		const getFileName = (path) =>
+			decodeURIComponent(path.split('/').pop().split('?')[0]);
+
+		const currentSrc = getFileName(video.src);
+
+		// обновляем плейлист БЕЗ сброса
+		currentPlaylist = newPlaylist;
+
+		// если видео ещё не запущено — стартуем
+		if (!video.src) {
+			playlistIndex = 0;
+			video.src = currentPlaylist[0];
+			video.play().catch(() => {});
+			return;
+		}
+
+		// если текущего видео больше нет — аккуратно переключаем
+		if (!currentPlaylist.includes(currentSrc)) {
+
+			// пытаемся перейти на ближайший индекс
+			if (playlistIndex >= currentPlaylist.length) {
+				playlistIndex = 0;
+			}
+
+			video.src = currentPlaylist[playlistIndex];
+			video.play().catch(() => {});
+		}
+
+		// ВАЖНО: если видео есть в списке → НИЧЕГО НЕ ДЕЛАЕМ
+
+	} catch (error) {
+		console.error("Could not load playlist.json:", error);
+	}
+
 }
 
 let idleTimer = null;
@@ -361,8 +323,3 @@ function resetIdleTimer() {
         panel.classList.remove('hidden'); // show after idle delay
     }, CONFIG.MEDIA_IDLE_DELAY * 1000);
 }
-
-speechSynthesis.onvoiceschanged = () => {
-    console.log("Voices loaded", speechSynthesis.getVoices());
-};
-

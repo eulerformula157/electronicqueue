@@ -1,6 +1,6 @@
 /* ================= board-nosound.js ================= */
 const PAGE_SIZE = 10;
-const VISUAL_NOTIFICATION_DURATION = 3000; // Увеличил до 3 сек для заметности
+const VISUAL_NOTIFICATION_DURATION = 3000; 
 const processedTickets = new Map();
 let highlightTickets = new Set(); 
 
@@ -32,7 +32,6 @@ function connectWS() {
     ws.onmessage = handleMessage;
 }
 
-// Универсальное получение ID
 const getCleanId = (t) => String(t.id || t.ticket_id || t.ticket_number || t.number || "");
 
 /* ================= MESSAGE HANDLING ================= */
@@ -40,20 +39,24 @@ const getCleanId = (t) => String(t.id || t.ticket_id || t.ticket_number || t.num
 function handleMessage(event) {
     const data = JSON.parse(event.data);
     
-    // Вспомогательная функция для поиска талона в текущем списке по номеру
     const findExistingTicketByNumber = (num) => {
         return previousTickets.find(p => String(p.number || p.ticket_number) === String(num));
     };
 
-    const isDuplicate = (ticket, isRecall = false) => {
-        if (isRecall) return false; 
-        const ticketId = getCleanId(ticket);
-        const now = Date.now();
-        if (queue.some(t => getCleanId(t) === ticketId)) return true;
-        if (currentlyCallingId === ticketId) return true;
-        if (processedTickets.has(ticketId) && (now - processedTickets.get(ticketId) < 5000)) return true;
-        return false;
-    };
+	const isDuplicate = (ticket) => {
+		const ticketId = getCleanId(ticket);
+		const now = Date.now();
+
+		if (queue.some(t => getCleanId(t) === ticketId)) return true;
+		if (currentlyCallingId === ticketId) return true;
+
+		// защита от дублей (включая recall)
+		if (processedTickets.has(ticketId) && (now - processedTickets.get(ticketId) < 3000)) {
+			return true;
+		}
+
+		return false;
+	};
 
     const addTicket = (ticket, isRecall = false) => {
         const ticketId = getCleanId(ticket);
@@ -64,7 +67,7 @@ function handleMessage(event) {
         }
     };
 
-    // 1. Сначала обновляем общую базу билетов (если пришел массив)
+    // Update tickets list
     if (data.tickets || Array.isArray(data)) {
         const tickets = data.tickets || data;
         if (initialized) {
@@ -76,22 +79,18 @@ function handleMessage(event) {
         initialized = true;
     }
 
-    // 2. Обработка RECALL — критически важный блок
+    // Handle Recall (Manual call)
     if (data.type === "recall_ticket" || (data.ticket_number && !data.tickets)) {
         const ticketNum = data.ticket_number || data.number;
-        
-        // Пытаемся найти уже существующий объект талона на табло
         const existing = findExistingTicketByNumber(ticketNum);
 
         const ticketToHighlight = {
-            // Если талон уже есть на табло, берем его "родной" ID. 
-            // Это ключ к тому, чтобы .classList.add('calling') сработал!
             id: existing ? existing.id : (data.ticket_id || data.id || ticketNum),
             number: ticketNum,
             window_name: data.window_name || (existing ? existing.window_name : "?")
         };
 
-        addTicket(ticketToHighlight, true); // true форсирует обход защиты от дублей
+        addTicket(ticketToHighlight, true); 
     }
 }
 
@@ -112,7 +111,6 @@ async function processVisualQueue() {
     currentlyCallingId = ticketId;
     highlightTickets.add(ticketId);
     
-    // Принудительно рендерим, чтобы переключить страницу на нужный билет
     renderPage();
 
     await new Promise(resolve => setTimeout(resolve, VISUAL_NOTIFICATION_DURATION));
@@ -136,7 +134,7 @@ function updateBoard(tickets){
     if(pageTimer) clearInterval(pageTimer);
     if(pages.length > 1) {
         pageTimer = setInterval(() => {
-            if (!currentlyCallingId) { // Не листаем страницы, если кто-то мигает
+            if (!currentlyCallingId) { 
                 currentPage = (currentPage + 1) % pages.length;
                 renderPage();
             }
@@ -147,7 +145,6 @@ function updateBoard(tickets){
 function renderPage() {
     const board = document.getElementById("board");
 
-    // Переключение страницы, если идет вызов
     if (currentlyCallingId) {
         const pageIdx = pages.findIndex(page => 
             page.some(t => getCleanId(t) === String(currentlyCallingId))
@@ -167,7 +164,6 @@ function renderPage() {
 
         const tId = getCleanId(t);
         
-        // Теперь tId точно совпадет с тем, что мы положили в highlightTickets при recall
         if (highlightTickets.has(tId)) {
             card.classList.add("calling");
         } else {
@@ -188,6 +184,7 @@ function renderPage() {
     }
     updateTitle();
 }
+
 function updateTitle(){
     const title = document.getElementById("title");
     title.textContent = pages.length > 1 

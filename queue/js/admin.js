@@ -323,10 +323,6 @@ async function addService() {
 //////// ОКНА
 ////////////////////////////////////////
 
-////////////////////////////////////////
-//////// ОКНА
-////////////////////////////////////////
-
 async function loadWindows() {
 	// Показываем форму и таблицу обратно
     document.getElementById("form").style.display = "block";
@@ -1024,7 +1020,6 @@ window.addEventListener("beforeunload", function () {
 
 });
 
-// В admin.html перепишите функцию ExitPage
 async function ExitPage() {
     const sessionId = sessionStorage.getItem("session_id");
     if (!sessionId) return;
@@ -1044,4 +1039,182 @@ async function ExitPage() {
     }
 }
 
+/// MEDIA FILES 
+
+// In admin.js
+async function loadMedia() {
+    setActiveTab('tab-media');
+    const sessionId = sessionStorage.getItem("session_id");
+
+    try {
+        // 1. Get both the physical files AND the playlist status
+        const response = await fetch(`${API}/admin/media/files`, {
+            headers: { "session-id": sessionId }
+        });
+        const data = await response.json();
+        
+        // Ensure we are working with arrays
+        const files = data.files || [];
+        const playlist = data.playlist || [];
+
+        let html = `<tr>
+            <th>Файл</th>
+            <th>Статус</th>
+            <th>Действия</th>
+        </tr>`;
+
+        files.forEach(filename => {
+            const webPath = `/queue/media/${filename}`;
+            const isIncluded = playlist.includes(webPath);
+            
+            html += `<tr>
+                <td>${filename}</td>
+                <td><b style="color: ${isIncluded ? 'var(--success)' : 'var(--text-muted)'}">
+                    ${isIncluded ? 'В плейлисте' : 'Исключен'}
+                </b></td>
+                <td>
+                    <a href="${webPath}" target="_blank" style="text-decoration: none;">
+                        <button style="background: var(--accent); color: white;">Просмотр</button>
+                    </a>
+                    <button onclick="toggleMedia('${filename}', ${isIncluded})" 
+                            style="background: ${isIncluded ? '#ffcc00' : 'var(--success)'}; color: white; margin-left: 5px;">
+                        ${isIncluded ? 'Исключить' : 'Включить'}
+                    </button>
+                    <button onclick="deletePhysicalFile('${filename}')" 
+                            style="background: var(--danger); color: white; margin-left: 5px;">
+                        Удалить
+                    </button>
+                </td>
+            </tr>`;
+        });
+
+        setTable(html);
+        setForm(`
+            <div class="form">
+                <h3>Загрузить видео (MP4, Max 50MB)</h3>
+                <input type="file" id="videoFileInput" accept="video/mp4">
+                <button onclick="uploadVideoFile()">Начать загрузку</button>
+                <div id="uploadStatus"></div>
+            </div>
+        `);
+    } catch (e) {
+        console.error("Ошибка загрузки медиа:", e);
+        setTable("<tr><td>Ошибка связи с сервером</td></tr>");
+    }
+}
+
+async function toggleMedia(filename, isCurrentlyIncluded) {
+    const webPath = `/queue/media/${filename}`;
+    const action = isCurrentlyIncluded ? "delete" : "add";
+
+    await fetchJSON(`${API}/admin/media/playlist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+            path: webPath, 
+            action: action 
+        })
+    });
+
+    loadMedia(); // Refresh table
+}
+
+// Logic to delete the file from the disk
+async function deletePhysicalFile(filename) {
+    if (!confirm(`Удалить файл ${filename} с сервера навсегда?`)) return;
+
+    const response = await fetch(`${API}/admin/media/file/${filename}`, {
+        method: "DELETE",
+        headers: { "session-id": sessionStorage.getItem("session_id") }
+    });
+
+    if (response.ok) {
+        loadMedia();
+    }
+}
+
+// Logic for the "Include/Exclude" toggle
+async function toggleInPlaylist(filename, currentlyIncluded) {
+    const action = currentlyIncluded ? "delete" : "add";
+    const path = `/queue/media/${filename}`;
+
+    const res = await fetchJSON(`${API}/admin/media/playlist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: path, action: action })
+    });
+    if (res) loadMedia();
+}
+
+// Logic for physical deletion
+async function deleteFromServer(filename) {
+    if (!confirm(`Вы уверены, что хотите полностью удалить ${filename} с сервера?`)) return;
+
+    const sessionId = sessionStorage.getItem("session_id");
+    const response = await fetch(`${API}/admin/media/file/${filename}`, {
+        method: "DELETE",
+        headers: { "session-id": sessionId }
+    });
+
+    if (response.ok) {
+        alert("Файл удален");
+        loadMedia();
+    }
+}
+
+async function uploadVideoFile() {
+    const fileInput = document.getElementById('videoFileInput');
+    const status = document.getElementById('uploadStatus');
+    const file = fileInput.files[0];
+
+    if (!file) return;
+
+    if (file.size > 50 * 1024 * 1024) {
+        alert("Файл слишком большой (> 50MB)");
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+    status.textContent = "Загрузка...";
+
+    const response = await fetch(`${API}/admin/media/upload`, {
+        method: "POST",
+        headers: { "session-id": sessionStorage.getItem("session_id") },
+        body: formData
+    });
+
+    if (response.ok) {
+        status.textContent = "Загружено!";
+        loadMedia();
+    } else {
+        const err = await response.json();
+        status.textContent = "Ошибка: " + err.detail;
+    }
+}
+
+async function addMedia() {
+    const path = document.getElementById("newVideoPath").value;
+    if (!path) return;
+
+    const res = await fetchJSON(`${API}/admin/media/playlist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: path, action: "add" })
+    });
+
+    if (res) loadMedia();
+}
+
+async function deleteMedia(index) {
+    if (!confirm("Удалить это видео из плейлиста?")) return;
+
+    const res = await fetchJSON(`${API}/admin/media/playlist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ index: index, action: "delete" })
+    });
+
+    if (res) loadMedia();
+}
 

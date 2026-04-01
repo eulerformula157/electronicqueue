@@ -21,9 +21,13 @@ import secrets
 import time
 from passlib.context import CryptContext
 import bcrypt
+import shutil
+from fastapi import UploadFile, File
 
 # Загружаем переменные из файла main.env
 load_dotenv("main.env")
+
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
 # Читаем константы из окружения с фоллбеками на значения по умолчанию
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5432/postgres")
@@ -285,6 +289,10 @@ class WindowServiceItem(BaseModel):
 class WindowServicesUpdate(BaseModel):
     services: List[WindowServiceItem]
 
+class PlaylistUpdate(BaseModel):
+    path: str = None
+    index: int = None
+    action: str # "add" or "delete"
 # ------------------ Эндпоинты ------------------
 
 @app.post("/services/", tags=["Services"])
@@ -1439,6 +1447,104 @@ async def update_priority(data: PriorityUpdate, admin: Admin = Depends(verify_ad
     db.close()
     return {"status": "updated"}
 
+@app.post("/admin/media/upload", tags=["Admin"])
+async def upload_media(
+    file: UploadFile = File(...), 
+    admin: Admin = Depends(verify_admin_session)
+    ):
+    # 1. Size Limit Check
+    # Spool to check size without reading everything into memory at once
+    file.file.seek(0, os.SEEK_END)
+    file_size = file.file.tell()
+    file.file.seek(0)
+    
+    if file_size > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="Файл слишком большой. Максимум 50MB.")
+
+    media_dir = "queue/media"
+    os.makedirs(media_dir, exist_ok=True)
+    file_path = os.path.join(media_dir, file.filename)
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+            
+    return {"status": "success", "filename": file.filename}
+
+@app.delete("/admin/media/file/{filename}", tags=["Admin"])
+async def delete_media_file(filename: str, admin: Admin = Depends(verify_admin_session)):
+    file_path = os.path.join("queue/media", filename)
+    
+    # 1. Remove from physical storage
+    if os.path.exists(file_path):
+        os.remove(file_path)
+    
+    # 2. Remove from playlist.json if it exists there
+    playlist_path = "queue/media/playlist.json"
+    if os.path.exists(playlist_path):
+        with open(playlist_path, "r", encoding="utf-8") as f:
+            playlist = json.load(f)
+        
+        web_path = f"/queue/media/{filename}"
+        if web_path in playlist:
+            playlist.remove(web_path)
+            with open(playlist_path, "w", encoding="utf-8") as f:
+                json.dump(playlist, f, ensure_ascii=False, indent=4)
+    
+    await manager.broadcast({"type": "playlist_updated"})
+    return {"status": "deleted"}
+
+@app.post("/admin/media/playlist", tags=["Admin"])
+async def update_playlist(data: PlaylistUpdate, admin: Admin = Depends(verify_admin_session)):
+    playlist_path = "queue/media/playlist.json"
+    
+    # Load current playlist
+    playlist = []
+    if os.path.exists(playlist_path):
+        with open(playlist_path, "r", encoding="utf-8") as f:
+            try:
+                playlist = json.load(f)
+                if not isinstance(playlist, list): # Safety check
+                    playlist = []
+            except:
+                playlist = []
+
+    if data.action == "add":
+        if data.path not in playlist:
+            playlist.append(data.path)
+    elif data.action == "delete":
+        playlist = [item for item in playlist if item != data.path]
+
+    with open(playlist_path, "w", encoding="utf-8") as f:
+        json.dump(playlist, f, ensure_ascii=False, indent=4)
+            
+    # BROADCAST UPDATE
+    await manager.broadcast({"type": "playlist_updated"})
+    
+    return {"status": "success"}
+        
+@app.get("/admin/media/files", tags=["Admin"])
+async def list_media_files(admin: Admin = Depends(verify_admin_session)):
+    media_dir = "queue/media"
+    if not os.path.exists(media_dir):
+        os.makedirs(media_dir)
+    
+    # List physical files on disk
+    physical_files = [f for f in os.listdir(media_dir) if f.endswith(('.mp4', '.webm'))]
+    
+    # Get current playlist
+    playlist_path = os.path.join(media_dir, "playlist.json")
+    playlist = []
+    if os.path.exists(playlist_path):
+        try:
+            with open(playlist_path, "r", encoding="utf-8") as f:
+                playlist = json.load(f)
+        except:
+            playlist = []
+            
+    return {
+        "files": physical_files,
+        "playlist": playlist
+    } 
 # ------------------ Дополнительные функции ------------------
 
 def get_called_tickets():
