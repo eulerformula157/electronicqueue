@@ -67,6 +67,15 @@ class ConnectionManager:
 
         for conn in dead:
             self.disconnect(conn)
+    
+    async def send_personal_message(self, message: dict, session_id: str):
+        if session_id in self.active_connections:
+            websocket = self.active_connections[session_id]
+            try:
+                await websocket.send_json(message)
+            except Exception:
+                # Если соединение мертво, просто игнорируем
+                pass
 
 
 manager = ConnectionManager()   
@@ -220,6 +229,7 @@ class AdminSession(Base):
     __tablename__ = "admin_sessions"
     session_id = Column(String, primary_key=True)
     admin_id = Column(Integer, ForeignKey("admins.id"))
+    last_seen = Column(TIMESTAMP, server_default=text("NOW()"), onupdate=text("NOW()"))
 
 class PriorityUpdate(BaseModel):
     window_id: int
@@ -1432,16 +1442,23 @@ async def get_my_details(operator: Operator = Depends(verify_session)):
         db.close()
 
 @app.post("/ping", tags=["Auth"])
-async def ping(data: PingRequest): # FastAPI автоматически распарсит JSON в эту модель
+async def ping(data: PingRequest):
     db = SessionLocal()
     try:
+        # Пытаемся найти сессию оператора
         session = db.query(UserSession).filter(UserSession.session_id == data.session_id).first()
+        
+        # Если не нашли в операторах, ищем в админах (для универсальности пинга)
+        if not session:
+            session = db.query(AdminSession).filter(AdminSession.session_id == data.session_id).first()
+
         if session:
             session.last_seen = datetime.now()
             db.commit()
             return {"status": "ok"}
         else:
-            raise HTTPException(status_code=404, detail="Session not found")
+            # Если сессии нет в базе — она была удалена клинером
+            raise HTTPException(status_code=401, detail="Session expired")
     finally:
         db.close()
 
@@ -1661,48 +1678,52 @@ async def cleanup_sessions():
         try:
             timeout_datetime = datetime.now() - timedelta(seconds=SESSION_TIMEOUT_SECONDS)
 
-            dead_sessions = db.query(UserSession).filter(
-                UserSession.last_seen < timeout_datetime
-            ).all()
-
+            # --- ЧАСТЬ 1: ОПЕРАТОРЫ ---
+            dead_sessions = db.query(UserSession).filter(UserSession.last_seen < timeout_datetime).all()
             if dead_sessions:
-                print(f"\n[Cleanup] Найдено мертвых сессий: {len(dead_sessions)}")
-                
-                need_board_update = False  # Флаг для обновления табло
+                print(f"\n[Cleanup] Найдено мертвых сессий операторов: {len(dead_sessions)}")
+                need_board_update = False
 
                 for session in dead_sessions:
-                    operator = db.query(Operator).filter(Operator.id == session.operator_id).first()
+                    # Уведомляем о выходе
+                    await manager.send_personal_message({"type": "session_expired"}, session.session_id)
                     
+                    operator = db.query(Operator).filter(Operator.id == session.operator_id).first()
                     if operator and operator.window_id:
-                        # 1. Обработка подвисшего тикета
+                        # Твоя логика сброса тикета
                         active_ticket = db.query(Ticket).filter(
                             Ticket.window_id == operator.window_id,
                             Ticket.status == "called"
                         ).first()
 
                         if active_ticket:
-                            print(f"  ! Тикет {active_ticket.number} возвращен в очередь из-за разрыва сессии")
                             active_ticket.status = "waiting"
                             active_ticket.window_id = None
-                            active_ticket.called_at = None
                             need_board_update = True
 
-                        # 2. Перевод окна в offline
                         window = db.query(Window).filter(Window.id == operator.window_id).first()
                         if window:
                             window.status = "offline"
-                            db.flush() 
                             update_services_status_for_window(db, window.id)
                     
                     db.delete(session)
-                
-                db.commit()
 
-                # Уведомляем всех об изменениях
+            # --- ЧАСТЬ 2: АДМИНИСТРАТОРЫ ---
+            # Предполагается, что модель называется AdminSession
+            dead_admin_sessions = db.query(AdminSession).filter(AdminSession.last_seen < timeout_datetime).all()
+            if dead_admin_sessions:
+                print(f"[Cleanup] Найдено мертвых сессий админов: {len(dead_admin_sessions)}")
+                for a_session in dead_admin_sessions:
+                    # Если для админов тоже нужен WS-протокол:
+                    await manager.send_personal_message({"type": "session_expired"}, a_session.session_id)
+                    db.delete(a_session)
+
+            db.commit()
+
+            # Общие уведомления
+            if dead_sessions:
                 await manager.broadcast({"type": "services_updated"})
-                
                 if need_board_update:
-                    # Если был сброшен вызванный тикет, обновляем табло (чтобы номер исчез)
                     await broadcast_board()
                     await manager.broadcast({"type": "queue_updated"})
 

@@ -56,6 +56,17 @@ function initWebSocket() {
             loadQueue();
         }
     };
+	
+	socket.onmessage = function(event) {
+    const data = JSON.parse(event.data);
+    
+    if (data.type === "session_expired") {
+        alert(data.message);
+        sessionStorage.clear();
+        window.location.href = "login.html";
+    }
+
+	};
 
     socket.onclose = () => {
         console.log("WebSocket отключен, переподключение...");
@@ -785,31 +796,46 @@ window.addEventListener("unload", () => {
     navigator.sendBeacon(`${CONFIG.API_URL}/logout`, data);
 });
 
-// Создаем воркер прямо из строки кода
 const pingWorkerCode = `
     setInterval(() => {
         postMessage('ping-tick');
-    }, 5000); // интервал 5 секунд
+    }, 5000);
 `;
 
 const blob = new Blob([pingWorkerCode], { type: 'application/javascript' });
 const worker = new Worker(URL.createObjectURL(blob));
 
-worker.onmessage = function() {
-    const sessionId = sessionStorage.getItem("session_id");
-    if (!sessionId) return;
+// 1. Изменяем обработку ответа в воркере
+worker.onmessage = function(e) {
+    if (e.data === 'ping-tick') {
+        const sessionId = sessionStorage.getItem("session_id");
+        if (!sessionId) return;
 
-    fetch(`${CONFIG.API_URL}/ping`, {
-        method: "POST",
-        headers: { 
-            "Content-Type": "application/json" 
-        },
-        body: JSON.stringify({ "session_id": sessionId }) 
-    })
-    .then(response => {
-        if (response.status === 422) {
-            console.error("Сервер все еще не принимает формат. Проверьте main.py");
-        }
-    })
-    .catch(err => console.debug("Ошибка фонового пинга:", err));
+        fetch(`${CONFIG.API_URL}/ping`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ "session_id": sessionId }) 
+        })
+        .then(response => {
+            if (response.status === 401) {
+                console.warn("Сессия удалена сервером. Выполняем выход...");
+                forceLogout();
+            }
+        })
+        .catch(err => console.debug("Ошибка фонового пинга:", err));
+    }
 };
+
+function forceLogout() {
+    sessionStorage.clear();
+    window.location.replace("/queue/login.html");
+}
+
+// 2. Добавляем слушатель сообщений ОТ воркера В основной поток
+worker.addEventListener('message', function(e) {
+    if (e.data === 'force-logout') {
+        console.warn("Сессия истекла (получен 401). Выход...");
+        sessionStorage.clear();
+        window.location.href = "/queue/login.html"; 
+    }
+});

@@ -1228,3 +1228,40 @@ async function deleteMedia(index) {
     if (res) loadMedia();
 }
 
+// Логика фонового пинга для админа
+(function() {
+    const pingWorkerCode = `
+        setInterval(() => {
+            postMessage('ping-tick');
+        }, 5000);
+    `;
+
+    const blob = new Blob([pingWorkerCode], { type: 'application/javascript' });
+    const worker = new Worker(URL.createObjectURL(blob));
+
+    worker.onmessage = function(e) {
+        if (e.data === 'ping-tick') {
+            const sessionId = sessionStorage.getItem("session_id");
+            if (!sessionId) return;
+
+            fetch(`${CONFIG.API_URL}/ping`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ "session_id": sessionId }) 
+            })
+            .then(response => {
+                if (response.status === 401) {
+                    console.warn("Админ-сессия истекла. Выход...");
+                    adminForceLogout();
+                }
+            })
+            .catch(err => console.debug("Ошибка пинга админа:", err));
+        }
+    };
+
+    function adminForceLogout() {
+        sessionStorage.clear();
+        // Используем replace, чтобы нельзя было вернуться назад через историю браузера
+        window.location.replace("login.html"); 
+    }
+})();
