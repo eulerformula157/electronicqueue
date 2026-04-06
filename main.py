@@ -629,6 +629,14 @@ def get_my_queue(operator: Operator = Depends(verify_session)):
             .all()
         )
 
+        # Считаем обслуженные за сегодня
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        tickets_served_today = db.query(Ticket).filter(
+            Ticket.window_id == operator.window_id,
+            Ticket.status == "finished",
+            Ticket.finished_at >= today_start
+        ).count()
+
         result = []
         for t in tickets:
             result.append({
@@ -636,12 +644,16 @@ def get_my_queue(operator: Operator = Depends(verify_session)):
                 "number": t.number,
                 "service_id": t.service_id,
                 "service_name": t.service.name if t.service else "Неизвестно",
+                "created_at": t.created_at.strftime("%H:%M") if t.created_at else "—",
                 "priority": db.query(WindowService.priority)
                               .filter_by(window_id=operator.window_id, service_id=t.service_id)
                               .scalar()
             })
-        
-        return result
+
+        return {
+            "tickets": result,
+            "tickets_served_today": tickets_served_today
+        }
     finally:
         db.close()
 

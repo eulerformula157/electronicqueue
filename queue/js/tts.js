@@ -29,7 +29,7 @@ async function processTTSQueue() {
 
     isAudioPlaying = true;
     const { ticket, onStateChange } = ttsQueue.shift();
-    const text = `Талон ${ticket.number}. Подойдите к окну ${ticket.window_name}.`;
+    const text = `Талон ${ticket.number}. Подойдите к ${ticket.window_name}.`;
 
     try {
         for (let i = 0; i < TTS_CONFIG.repeatCount; i++) {

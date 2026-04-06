@@ -131,20 +131,28 @@ async function loadQueue() {
             headers: { "session-id": sessionId }
         });
 
-        const tickets = await res.json();
+        const data = await res.json();
+        const tickets = data.tickets ?? data;
         const panel = document.getElementById("queue-list");
 
         if (!tickets.length) {
             panel.innerHTML = "<div style='color:var(--text-muted); padding:20px;'>Нет ожидающих</div>";
-            return;
+        } else {
+            panel.innerHTML = tickets.map(t => `
+                <div class="queue-item">
+                    <div style="display:flex; justify-content:space-between; align-items:baseline; width:100%;">
+                        <span>№ ${t.number}</span>
+                        <span style="font-size:0.8rem; font-weight:500; color:var(--text-muted); margin-left:8px;">${t.created_at}</span>
+                    </div>
+                    <div class="queue-service-name">${t.service_name || 'Услуга не указана'}</div>
+                </div>
+            `).join("");
         }
 
-        panel.innerHTML = tickets.map(t => `
-            <div class="queue-item">
-                <div>№ ${t.number}</div>
-                <div class="queue-service-name">${t.service_name || 'Услуга не указана'}</div>
-            </div>
-        `).join("");
+        if (data.tickets_served_today !== undefined) {
+            const counter = document.getElementById("served-today-count");
+            if (counter) counter.textContent = data.tickets_served_today;
+        }
 
     } catch (e) {
         console.error("Ошибка загрузки очереди:", e);

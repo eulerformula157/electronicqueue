@@ -1043,7 +1043,17 @@ async function ExitPage() {
 
 // In admin.js
 async function loadMedia() {
+	// Показываем форму и таблицу обратно
+    document.getElementById("form").style.display = "block";
+    document.getElementById("table").style.display = "table";
+ 
     setActiveTab('tab-media');
+
+	
+    // Удаляем блок статистики, чтобы он не мешал
+    const statsContainer = document.getElementById("stats-container");
+    if (statsContainer) statsContainer.remove();	
+	
     const sessionId = sessionStorage.getItem("session_id");
 
     try {
@@ -1074,7 +1084,7 @@ async function loadMedia() {
                 </b></td>
                 <td>
                     <a href="${webPath}" target="_blank" style="text-decoration: none;">
-                        <button style="background: var(--accent); color: white;">Просмотр</button>
+                        <button style="background: var(--accent); color: white;">Предпросмотр</button>
                     </a>
                     <button onclick="toggleMedia('${filename}', ${isIncluded})" 
                             style="background: ${isIncluded ? '#ffcc00' : 'var(--success)'}; color: white; margin-left: 5px;">
