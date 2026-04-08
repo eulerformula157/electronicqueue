@@ -120,6 +120,10 @@ def verify_session(session_id: str = Header(...)):
         session = db.query(UserSession).filter(UserSession.session_id == session_id).first()
         if not session:
             raise HTTPException(status_code=401, detail="Invalid session")
+        # Refresh "online" activity on any authenticated request.
+        # This makes cleanup tolerant to cases where WS heartbeats are temporarily missing.
+        session.last_seen = datetime.now()
+        db.commit()
         operator = db.query(Operator).filter(Operator.id == session.operator_id).first()
         if not operator:
             raise HTTPException(status_code=401, detail="Operator not found")
@@ -138,6 +142,10 @@ def verify_admin_session(session_id: str = Header(None)):
         db.close()
         raise HTTPException(status_code=401, detail="Неверная сессия администратора")
     
+    # Refresh "online" activity on any authenticated request.
+    session.last_seen = datetime.now()
+    db.commit()
+
     admin = db.query(Admin).filter(Admin.id == session.admin_id).first()
     db.close()
     
@@ -976,10 +984,44 @@ async def login(data: LoginRequest):
         
         # Проверяем хэшированный пароль админа
         if admin and verify_password(data.password, admin.password):
+            now = datetime.now()
+            timeout_datetime = now - timedelta(seconds=SESSION_TIMEOUT_SECONDS)
+
+            # Если у админа уже есть "свежая" сессия — переиспользуем ее,
+            # чтобы избежать дублей при double-submit логина.
+            existing_session = (
+                db.query(AdminSession)
+                .filter(AdminSession.admin_id == admin.id)
+                .order_by(AdminSession.last_seen.desc())
+                .first()
+            )
+
+            if existing_session and existing_session.last_seen and existing_session.last_seen >= timeout_datetime:
+                existing_session.last_seen = now
+                db.commit()
+
+                # Удаляем другие "лишние" дубликаты, чтобы браузер всегда работал с одним токеном
+                db.query(AdminSession).filter(
+                    AdminSession.admin_id == admin.id,
+                    AdminSession.session_id != existing_session.session_id
+                ).delete()
+                db.commit()
+
+                return {
+                    "session_id": existing_session.session_id,
+                    "name": admin.name,
+                    "role": "admin"
+                }
+
+            # Иначе создаем новую сессию (старые чистим)
+            db.query(AdminSession).filter(AdminSession.admin_id == admin.id).delete()
+            db.flush()
+
             token = secrets.token_hex(32)
             new_session = AdminSession(session_id=token, admin_id=admin.id)
             db.add(new_session)
             db.commit()
+
             return {
                 "session_id": token,
                 "name": admin.name,
@@ -991,20 +1033,73 @@ async def login(data: LoginRequest):
         
         # Проверяем хэшированный пароль оператора
         if operator and verify_password(data.password, operator.password):
+            now = datetime.now()
+            timeout_datetime = now - timedelta(seconds=SESSION_TIMEOUT_SECONDS)
+
+            # Если у оператора уже есть "свежая" сессия — переиспользуем ее,
+            # чтобы избежать ситуации с двумя сессиями при double-submit логина.
+            existing_session = (
+                db.query(UserSession)
+                .filter(UserSession.operator_id == operator.id)
+                .order_by(UserSession.last_seen.desc())
+                .first()
+            )
+
+            if existing_session and existing_session.last_seen and existing_session.last_seen >= timeout_datetime:
+                existing_session.last_seen = now
+                db.commit()
+
+                # Логика статуса окна (на входе гарантируем online)
+                if operator.window_id:
+                    window = db.query(Window).filter(Window.id == operator.window_id).first()
+                    if window:
+                        window.status = "online"
+                        db.flush()
+                        update_services_status_for_window(db, window.id)
+                        db.commit()
+                        await manager.broadcast({
+                            "type": "services_updated",
+                            "window_id": operator.window_id
+                        })
+                    else:
+                        db.commit()
+                else:
+                    db.commit()
+
+                # Удаляем лишние "старые" дубликаты, если вдруг успели появиться
+                db.query(UserSession).filter(
+                    UserSession.operator_id == operator.id,
+                    UserSession.session_id != existing_session.session_id
+                ).delete()
+                db.commit()
+
+                return {
+                    "session_id": existing_session.session_id,
+                    "name": operator.name,
+                    "window_id": operator.window_id,
+                    "role": "operator"
+                }
+
+            # Иначе: удаляем старые сессии этого оператора и создаем новую
+            db.query(UserSession).filter(UserSession.operator_id == operator.id).delete()
+            db.flush()
+
             token = secrets.token_hex(32)
             new_session = UserSession(
-                session_id=token, 
-                operator_id=operator.id, 
-                created_at=datetime.now()
+                session_id=token,
+                operator_id=operator.id,
+                created_at=now
             )
             db.add(new_session)
-            
+            db.commit()
+            db.refresh(new_session)
+
             # Логика статуса окна
             if operator.window_id:
                 window = db.query(Window).filter(Window.id == operator.window_id).first()
                 if window:
                     window.status = "online"
-                    db.flush() 
+                    db.flush()
                     update_services_status_for_window(db, window.id)
                     db.commit()
                     await manager.broadcast({
@@ -1311,33 +1406,62 @@ def get_dashboard_data(operator: Operator = Depends(verify_session)):
 
 @app.websocket("/ws/terminal")
 async def websocket_endpoint(websocket: WebSocket):
+    """
+    Общий WebSocket‑канал для терминалов, операторов и админки.
+    Теперь сюда же приходят небольшие heartbeat‑сообщения:
+    {"type": "ping", "session_id": "..."} — мы обновляем last_seen в БД.
+    """
     db: Session = SessionLocal()
     await manager.connect(websocket)
     try:
         while True:
-            # Получаем ЛЮБОЕ сообщение от кого угодно
-            data = await websocket.receive_text()
-            message = json.loads(data)
-            
-            # Обрабатываем типы сообщений
-            if message.get("type") == "queue_updated":
-                # Рассылаем всем подключенным (и операторам, и терминалам)
+            raw = await websocket.receive_text()
+            try:
+                message = json.loads(raw)
+            except Exception:
+                # Игнорируем некорректный JSON, чтобы не ронять соединение
+                continue
+
+            msg_type = message.get("type")
+
+            # WebSocket heartbeat: обновляем last_seen по session_id
+            if msg_type == "ping":
+                session_id = message.get("session_id")
+                if not session_id:
+                    continue
+
+                try:
+                    # Пытаемся найти сначала операторскую, затем админскую сессию
+                    session = db.query(UserSession).filter(
+                        UserSession.session_id == session_id
+                    ).first()
+                    if not session:
+                        session = db.query(AdminSession).filter(
+                            AdminSession.session_id == session_id
+                        ).first()
+
+                    if session:
+                        session.last_seen = datetime.now()
+                        db.commit()
+                    else:
+                        # Если сессии нет в БД — уведомляем клиента и закрываем WS
+                        await websocket.send_json({"type": "session_expired"})
+                        await websocket.close()
+                        break
+                except Exception:
+                    db.rollback()
+                continue
+
+            # Обрабатываем старые типы служебных сообщений
+            if msg_type == "queue_updated":
                 await manager.broadcast({"type": "queue_updated"})
-            
-            elif message.get("type") == "services_updated":
+            elif msg_type == "services_updated":
                 await manager.broadcast({"type": "services_updated"})
-                
+
     except WebSocketDisconnect:
         manager.disconnect(websocket)
-
-        
-    
+    finally:
         db.close()
-
-        # уведомляем терминалы
-        await manager.broadcast({
-            "type": "services_updated"
-        })
 
 
 @app.websocket("/ws/board")
@@ -1685,12 +1809,21 @@ async def cleanup_sessions():
                 need_board_update = False
 
                 for session in dead_sessions:
-                    # Уведомляем о выходе
-                    await manager.send_personal_message({"type": "session_expired"}, session.session_id)
-                    
+                    # Проверяем, есть ли ещё ЖИВЫЕ сессии этого оператора
+                    other_alive = db.query(UserSession).filter(
+                        UserSession.operator_id == session.operator_id,
+                        UserSession.last_seen >= timeout_datetime,
+                        UserSession.session_id != session.session_id
+                    ).first()
+
+                    if other_alive:
+                        # У оператора есть другая живая сессия — просто удаляем устаревшую запись
+                        db.delete(session)
+                        continue
+
+                    # Если других живых сессий нет — действительно считаем оператора "ушедшим"
                     operator = db.query(Operator).filter(Operator.id == session.operator_id).first()
                     if operator and operator.window_id:
-                        # Твоя логика сброса тикета
                         active_ticket = db.query(Ticket).filter(
                             Ticket.window_id == operator.window_id,
                             Ticket.status == "called"
@@ -1705,7 +1838,7 @@ async def cleanup_sessions():
                         if window:
                             window.status = "offline"
                             update_services_status_for_window(db, window.id)
-                    
+
                     db.delete(session)
 
             # --- ЧАСТЬ 2: АДМИНИСТРАТОРЫ ---
@@ -1714,8 +1847,7 @@ async def cleanup_sessions():
             if dead_admin_sessions:
                 print(f"[Cleanup] Найдено мертвых сессий админов: {len(dead_admin_sessions)}")
                 for a_session in dead_admin_sessions:
-                    # Если для админов тоже нужен WS-протокол:
-                    await manager.send_personal_message({"type": "session_expired"}, a_session.session_id)
+                    # Для админов просто удаляем устаревшие сессии
                     db.delete(a_session)
 
             db.commit()

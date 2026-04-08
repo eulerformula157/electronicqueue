@@ -49,13 +49,14 @@ body {
 /* Основной контейнер */
 .main-layout {
     display: grid;
-    /* Бока по 1 части, центр — 2 части от свободного пространства */
     grid-template-columns: 1fr 3fr 1fr; 
     gap: 20px;
     padding: 20px;
     flex: 1;
+    min-height: 0; 
+    overflow: hidden;
     width: 100%;
-    max-width: 100%; /* Занимать весь экран по ширине */
+    max-width: 100%;
     margin: 0 auto;
     box-sizing: border-box;
 }
@@ -68,8 +69,8 @@ body {
     box-shadow: var(--shadow);
     display: flex;
     flex-direction: column;
-    max-height: 100%; /* Карточка не должна быть выше родительской сетки */
-    overflow: hidden; /* Чтобы скроллилась только очередь, а не вся карточка */
+    min-height: 0; 
+    overflow: hidden;
 }
 
 /* Центральная зона с номером */
@@ -116,11 +117,9 @@ body {
 
 /* Очередь */
 .queue-list {
-    /* Фиксируем высоту: высота экрана минус шапка, отступы и заголовок */
-    height: calc(100vh - 200px); 
     overflow-y: auto;
-    margin-top: 15px;
-    padding-right: 10px; /* Отступ для скроллбара */
+    padding-right: 10px;
+    min-height: 0; /* критично для flex */
 }
 
 /* Сделаем скроллбар более аккуратным в стиле вуза */

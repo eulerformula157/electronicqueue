@@ -30,12 +30,12 @@
 </header>
 
 <main class="main-layout">
-	<section class="glass-card" style="display:flex; flex-direction:column;">
+	<section class="glass-card" style="display:flex; flex-direction:column; overflow:hidden;">
 		<h3 style="margin-top:0">Очередь</h3>
-		<div id="queue-list" class="queue-list" style="flex:1;">Загрузка...</div>
-		<div style="margin-top:auto; padding-top:16px; border-top:1px solid #e2e8f0;">
+		<div id="queue-list" class="queue-list" style="flex:1; overflow-y:auto; min-height:0;">Загрузка...</div>
+		<div style="flex-shrink:0; padding-top:16px; border-top:1px solid #e2e8f0;">
 			<span style="font-size:0.95rem; text-transform:uppercase; font-weight:800; color:var(--text-main); letter-spacing:0.5px;">Обслужено сегодня:</span>
-			<span id="served-today-count" style="font-size:1.2rem; font-weight:800; color:var(--primary); margin-left:4px;">—</span>
+			<span id="served-today-count" style="font-size:1.8rem; font-weight:700; color:var(--primary); margin-left:10px;">—</span>
 		</div>
 	</section>
 

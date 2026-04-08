@@ -1,8 +1,11 @@
 const API = CONFIG.API_URL;
 const GRAFANA = CONFIG.GRAFANA_URL;
 
+// Глобальный WebSocket для админки (используем тот же канал, что и терминалы)
+let adminSocket = null;
 
-// Проверка авторизации при загрузке страницы
+
+// Проверка авторизации при загрузке страницы + запуск WebSocket
 async function init() {
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -32,6 +35,9 @@ document.addEventListener("DOMContentLoaded", async () => {
         // Если всё хорошо, продолжаем инициализацию страницы
         //loadOperators(); 
 
+        // Подключаем WebSocket после успешной проверки сессии
+        initAdminWebSocket();
+
     } catch (err) {
         console.error("Auth check failed:", err);
         sessionStorage.removeItem("session_id");
@@ -42,6 +48,28 @@ document.addEventListener("DOMContentLoaded", async () => {
 }
 
 init();
+
+function initAdminWebSocket() {
+    adminSocket = new WebSocket(CONFIG.WS_TERMINAL_URL);
+
+    adminSocket.onopen = () => {
+        console.log("Admin WS connected");
+    };
+
+    adminSocket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === "session_expired") {
+            // Сервер явно сообщил об истечении сессии
+            sessionStorage.clear();
+            window.location.replace("login.html");
+        }
+    };
+
+    adminSocket.onclose = () => {
+        console.log("Admin WS closed, will reconnect");
+        setTimeout(initAdminWebSocket, CONFIG.RECONNECT_INTERVAL || 2000);
+    };
+}
 
 let windows=[]
 let operators=[]
@@ -1228,40 +1256,18 @@ async function deleteMedia(index) {
     if (res) loadMedia();
 }
 
-// Логика фонового пинга для админа
-(function() {
-    const pingWorkerCode = `
-        setInterval(() => {
-            postMessage('ping-tick');
-        }, 5000);
-    `;
+// Логика фонового heartbeat для админа через WebSocket (вместо HTTP /ping)
+setInterval(() => {
+    const sid = sessionStorage.getItem("session_id");
+    if (!sid) return;
+    if (!adminSocket || adminSocket.readyState !== WebSocket.OPEN) return;
 
-    const blob = new Blob([pingWorkerCode], { type: 'application/javascript' });
-    const worker = new Worker(URL.createObjectURL(blob));
-
-    worker.onmessage = function(e) {
-        if (e.data === 'ping-tick') {
-            const sessionId = sessionStorage.getItem("session_id");
-            if (!sessionId) return;
-
-            fetch(`${CONFIG.API_URL}/ping`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ "session_id": sessionId }) 
-            })
-            .then(response => {
-                if (response.status === 401) {
-                    console.warn("Админ-сессия истекла. Выход...");
-                    adminForceLogout();
-                }
-            })
-            .catch(err => console.debug("Ошибка пинга админа:", err));
-        }
-    };
-
-    function adminForceLogout() {
-        sessionStorage.clear();
-        // Используем replace, чтобы нельзя было вернуться назад через историю браузера
-        window.location.replace("login.html"); 
+    try {
+        adminSocket.send(JSON.stringify({
+            type: "ping",
+            session_id: sid
+        }));
+    } catch (e) {
+        console.debug("Admin WS ping error:", e);
     }
-})();
+}, 5000);
