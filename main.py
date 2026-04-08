@@ -1,14 +1,14 @@
 # main.py
 import os
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Body, Header, Depends, status
+from fastapi import FastAPI, HTTPException, Body, Header, Depends, status, Query
 from pydantic import BaseModel
 from sqlalchemy import Column, Integer, String, ForeignKey, TIMESTAMP, text
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy import create_engine
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List
+from typing import List, Set
 from sqlalchemy import asc
 from fastapi.params import Path
 from sqlalchemy.orm import Session
@@ -22,15 +22,20 @@ from passlib.context import CryptContext
 import bcrypt
 import shutil
 from fastapi import UploadFile, File
+from pathlib import Path as FilePath
 
 # Загружаем переменные из файла main.env
 load_dotenv("main.env")
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+DEFAULT_PAGE_LIMIT = 100
+MAX_PAGE_LIMIT = 500
+ALLOWED_MEDIA_EXTENSIONS = {".mp4", ".webm"}
 
-# Читаем константы из окружения с фоллбеками на значения по умолчанию
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5432/postgres")
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
+# Читаем константы из окружения с более безопасными дефолтами
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://localhost:5432/postgres")
+raw_cors_origins = os.getenv("CORS_ORIGINS", "http://localhost,http://127.0.0.1")
+CORS_ORIGINS = [origin.strip() for origin in raw_cors_origins.split(",") if origin.strip()]
 SESSION_TIMEOUT_SECONDS = int(os.getenv("SESSION_TIMEOUT_SECONDS", "30"))
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -319,6 +324,31 @@ class PlaylistUpdate(BaseModel):
     path: str = None
     index: int = None
     action: str # "add" or "delete"
+
+
+def sanitize_media_filename(filename: str) -> str:
+    if not filename:
+        raise HTTPException(status_code=400, detail="Имя файла отсутствует")
+
+    # Strip directory parts and normalize extension.
+    safe_name = os.path.basename(filename).strip()
+    if safe_name in {"", ".", ".."}:
+        raise HTTPException(status_code=400, detail="Некорректное имя файла")
+
+    ext = FilePath(safe_name).suffix.lower()
+    if ext not in ALLOWED_MEDIA_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Недопустимое расширение файла")
+
+    return safe_name
+
+
+def build_media_file_path(filename: str) -> str:
+    media_dir = os.path.abspath("queue/media")
+    os.makedirs(media_dir, exist_ok=True)
+    target_path = os.path.abspath(os.path.join(media_dir, filename))
+    if os.path.commonpath([media_dir, target_path]) != media_dir:
+        raise HTTPException(status_code=400, detail="Некорректный путь файла")
+    return target_path
 # ------------------ Эндпоинты ------------------
 
 @app.post("/services/", tags=["Services"])
@@ -337,9 +367,12 @@ async def create_service(service: ServiceCreate, admin: Admin = Depends(verify_a
     return db_service
 
 @app.get("/services/", tags=["Services"])
-def list_services():
+def list_services(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT)
+):
     db = SessionLocal()
-    services = db.query(Service).order_by(Service.id).all()
+    services = db.query(Service).order_by(Service.id).offset(skip).limit(limit).all()
     db.close()
     return services
 
@@ -634,7 +667,11 @@ async def cancel_current_ticket(operator: Operator = Depends(verify_session)):
     return {"status": "cancelled", "ticket_number": ticket.number}
 
 @app.get("/tickets/my-queue", tags=["Tickets"])
-def get_my_queue(operator: Operator = Depends(verify_session)):
+def get_my_queue(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
+    operator: Operator = Depends(verify_session)
+):
     db = SessionLocal()
     try:
         if not operator.window_id:
@@ -642,8 +679,16 @@ def get_my_queue(operator: Operator = Depends(verify_session)):
 
         # Соединяем билеты с настройками приоритетов конкретного окна
         tickets = (
-            db.query(Ticket)
+            db.query(
+                Ticket.id,
+                Ticket.number,
+                Ticket.service_id,
+                Ticket.created_at,
+                Service.name.label("service_name"),
+                WindowService.priority.label("priority")
+            )
             .join(WindowService, Ticket.service_id == WindowService.service_id)
+            .join(Service, Service.id == Ticket.service_id)
             .filter(
                 WindowService.window_id == operator.window_id,
                 Ticket.status == "waiting"
@@ -652,6 +697,8 @@ def get_my_queue(operator: Operator = Depends(verify_session)):
                 WindowService.priority.asc(), # Самые важные услуги сверху
                 Ticket.created_at.asc()        # Внутри приоритета — по времени записи
             )
+            .offset(skip)
+            .limit(limit)
             .all()
         )
 
@@ -669,11 +716,9 @@ def get_my_queue(operator: Operator = Depends(verify_session)):
                 "id": t.id,
                 "number": t.number,
                 "service_id": t.service_id,
-                "service_name": t.service.name if t.service else "Неизвестно",
+                "service_name": t.service_name or "Неизвестно",
                 "created_at": t.created_at.strftime("%H:%M") if t.created_at else "—",
-                "priority": db.query(WindowService.priority)
-                              .filter_by(window_id=operator.window_id, service_id=t.service_id)
-                              .scalar()
+                "priority": t.priority
             })
 
         return {
@@ -815,11 +860,15 @@ def create_operator(
         db.close()
 
 @app.get("/operators/", tags=["Operators"])
-async def list_operators(admin: Admin = Depends(verify_admin_session)):
+async def list_operators(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
+    admin: Admin = Depends(verify_admin_session)
+):
     db = SessionLocal()
     try:
         # Получаем всех операторов из базы
-        operators = db.query(Operator).order_by(Operator.id).all()
+        operators = db.query(Operator).order_by(Operator.id).offset(skip).limit(limit).all()
         
         # Создаем новый список, где вместо хэшей паролей будут точки
         safe_operators = []
@@ -853,14 +902,22 @@ def create_window(window: WindowCreate, admin: Admin = Depends(verify_admin_sess
     return db_window
 
 @app.get("/windows/", tags=["Windows"])
-async def list_windows(admin: Admin = Depends(verify_admin_session)):
+async def list_windows(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
+    admin: Admin = Depends(verify_admin_session)
+):
     db = SessionLocal()
-    windows = db.query(Window).order_by(Window.id).all()
+    windows = db.query(Window).order_by(Window.id).offset(skip).limit(limit).all()
     db.close()
     return windows
 
 @app.patch("/windows/{window_id}/status", tags=["Windows"])
-async def update_window_status(window_id: int, data: WindowStatusUpdate = Body(...)):
+async def update_window_status(
+    window_id: int,
+    data: WindowStatusUpdate = Body(...),
+    admin: Admin = Depends(verify_admin_session)
+):
     db = SessionLocal()
     try:
         window = db.query(Window).filter(Window.id == window_id).first()
@@ -912,9 +969,13 @@ async def create_window_service(data: WindowServiceCreate, admin: Admin = Depend
     return ws
 
 @app.get("/window-services/", response_model=List[WindowServiceRead], tags=["Windows"])
-def list_window_services():
+def list_window_services(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
+    admin: Admin = Depends(verify_admin_session)
+):
     db = SessionLocal()
-    result = db.query(WindowService).all()
+    result = db.query(WindowService).order_by(WindowService.window_id, WindowService.service_id).offset(skip).limit(limit).all()
     db.close()
     return result
 
@@ -1332,7 +1393,7 @@ async def delete_operator(operator_id: int, admin: Admin = Depends(verify_admin_
     
    
 @app.patch("/operators/{operator_id}", tags=["Operators"])
-async def update_operator(operator_id: int, data: dict):
+async def update_operator(operator_id: int, data: dict, admin: Admin = Depends(verify_admin_session)):
 
     db = SessionLocal()
 
@@ -1617,6 +1678,8 @@ async def upload_media(
     file: UploadFile = File(...), 
     admin: Admin = Depends(verify_admin_session)
     ):
+    safe_filename = sanitize_media_filename(file.filename)
+
     # 1. Size Limit Check
     # Spool to check size without reading everything into memory at once
     file.file.seek(0, os.SEEK_END)
@@ -1626,30 +1689,29 @@ async def upload_media(
     if file_size > MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="Файл слишком большой. Максимум 50MB.")
 
-    media_dir = "queue/media"
-    os.makedirs(media_dir, exist_ok=True)
-    file_path = os.path.join(media_dir, file.filename)
+    file_path = build_media_file_path(safe_filename)
     
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
             
-    return {"status": "success", "filename": file.filename}
+    return {"status": "success", "filename": safe_filename}
 
 @app.delete("/admin/media/file/{filename}", tags=["Admin"])
 async def delete_media_file(filename: str, admin: Admin = Depends(verify_admin_session)):
-    file_path = os.path.join("queue/media", filename)
+    safe_filename = sanitize_media_filename(filename)
+    file_path = build_media_file_path(safe_filename)
     
     # 1. Remove from physical storage
     if os.path.exists(file_path):
         os.remove(file_path)
     
     # 2. Remove from playlist.json if it exists there
-    playlist_path = "queue/media/playlist.json"
+    playlist_path = os.path.abspath("queue/media/playlist.json")
     if os.path.exists(playlist_path):
         with open(playlist_path, "r", encoding="utf-8") as f:
             playlist = json.load(f)
         
-        web_path = f"/queue/media/{filename}"
+        web_path = f"/queue/media/{safe_filename}"
         if web_path in playlist:
             playlist.remove(web_path)
             with open(playlist_path, "w", encoding="utf-8") as f:
@@ -1660,7 +1722,8 @@ async def delete_media_file(filename: str, admin: Admin = Depends(verify_admin_s
 
 @app.post("/admin/media/playlist", tags=["Admin"])
 async def update_playlist(data: PlaylistUpdate, admin: Admin = Depends(verify_admin_session)):
-    playlist_path = "queue/media/playlist.json"
+    playlist_path = os.path.abspath("queue/media/playlist.json")
+    os.makedirs(os.path.dirname(playlist_path), exist_ok=True)
     
     # Load current playlist
     playlist = []
@@ -1674,6 +1737,9 @@ async def update_playlist(data: PlaylistUpdate, admin: Admin = Depends(verify_ad
                 playlist = []
 
     if data.action == "add":
+        if not data.path or not data.path.startswith("/queue/media/"):
+            raise HTTPException(status_code=400, detail="Некорректный путь в плейлисте")
+        sanitize_media_filename(data.path.rsplit("/", 1)[-1])
         if data.path not in playlist:
             playlist.append(data.path)
     elif data.action == "delete":
@@ -1689,12 +1755,15 @@ async def update_playlist(data: PlaylistUpdate, admin: Admin = Depends(verify_ad
         
 @app.get("/admin/media/files", tags=["Admin"])
 async def list_media_files(admin: Admin = Depends(verify_admin_session)):
-    media_dir = "queue/media"
+    media_dir = os.path.abspath("queue/media")
     if not os.path.exists(media_dir):
         os.makedirs(media_dir)
     
     # List physical files on disk
-    physical_files = [f for f in os.listdir(media_dir) if f.endswith(('.mp4', '.webm'))]
+    physical_files = [
+        f for f in os.listdir(media_dir)
+        if FilePath(f).suffix.lower() in ALLOWED_MEDIA_EXTENSIONS
+    ]
     
     # Get current playlist
     playlist_path = os.path.join(media_dir, "playlist.json")
@@ -1746,23 +1815,36 @@ async def broadcast_board():
             pass
 
 def update_services_status_for_window(db: Session, window_id: int):
-    # 1. Получаем ID всех услуг, которые закреплены за данным окном
-    service_ids = [s[0] for s in db.query(WindowService.service_id).filter(WindowService.window_id == window_id).all()]
+    # Получаем все услуги окна одним запросом.
+    service_ids = [
+        row[0]
+        for row in db.query(WindowService.service_id)
+        .filter(WindowService.window_id == window_id)
+        .all()
+    ]
+    if not service_ids:
+        db.commit()
+        return
 
-    for s_id in service_ids:
-        # 2. Проверяем, есть ли хоть ОДНО окно в статусе online для этой услуги
-        online_exists = db.query(WindowService).join(Window).filter(
-            WindowService.service_id == s_id,
+    # Находим услуги, у которых есть хотя бы одно online-окно, одним запросом.
+    online_service_ids = {
+        row[0]
+        for row in db.query(WindowService.service_id)
+        .join(Window, WindowService.window_id == Window.id)
+        .filter(
+            WindowService.service_id.in_(service_ids),
             Window.status == "online"
-        ).first() # .first() быстрее чем .count(), нам достаточно узнать есть ли хотя бы один
+        )
+        .distinct()
+        .all()
+    }
 
-        service = db.query(Service).filter(Service.id == s_id).first()
-        if service:
-            new_status = "active" if online_exists else "inactive"
-            if service.status != new_status:
-                service.status = new_status
-    
-    # Убрали db.commit(), теперь это делает вызывающая функция
+    services = db.query(Service).filter(Service.id.in_(service_ids)).all()
+    for service in services:
+        new_status = "active" if service.id in online_service_ids else "inactive"
+        if service.status != new_status:
+            service.status = new_status
+
     db.commit()
     
 def get_operator_state(operator_id: int):
