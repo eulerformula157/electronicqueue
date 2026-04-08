@@ -1813,6 +1813,22 @@ async def cleanup_sessions():
         db: Session = SessionLocal()
         try:
             timeout_datetime = datetime.now() - timedelta(seconds=SESSION_TIMEOUT_SECONDS)
+            mapped_session_ids = list(manager.session_id_to_ws.keys())
+            ws_alive_operator_ids = set()
+            ws_alive_admin_ids = set()
+            if mapped_session_ids:
+                ws_user_rows = (
+                    db.query(UserSession.operator_id)
+                    .filter(UserSession.session_id.in_(mapped_session_ids))
+                    .all()
+                )
+                ws_admin_rows = (
+                    db.query(AdminSession.admin_id)
+                    .filter(AdminSession.session_id.in_(mapped_session_ids))
+                    .all()
+                )
+                ws_alive_operator_ids = {row[0] for row in ws_user_rows if row and row[0] is not None}
+                ws_alive_admin_ids = {row[0] for row in ws_admin_rows if row and row[0] is not None}
 
             # --- ЧАСТЬ 1: ОПЕРАТОРЫ ---
             dead_sessions = db.query(UserSession).filter(UserSession.last_seen < timeout_datetime).all()
@@ -1821,12 +1837,11 @@ async def cleanup_sessions():
                 need_board_update = False
 
                 for session in dead_sessions:
-                    # Если у сессии есть активный WebSocket (хоть и без регулярных ping),
-                    # считаем оператора живым и обновляем last_seen, чтобы cleanup не удалял.
-                    if session.session_id in manager.session_id_to_ws:
+                    # Если у оператора есть активный WS (по owner-id), не удаляем сессию.
+                    if session.operator_id in ws_alive_operator_ids:
                         session.last_seen = datetime.now()
                         print(
-                            f"[Cleanup] Пинг не идет, но ws соединение есть — не считаем сессию мертвой "
+                            f"[Cleanup] Пинг от оператора не идет, но ws соединение есть — не считаем сессию мертвой "
                         )
                         continue
 
@@ -1868,13 +1883,14 @@ async def cleanup_sessions():
             if dead_admin_sessions:
                 print(f"[Cleanup] Найдено мертвых сессий админов: {len(dead_admin_sessions)}")
                 for a_session in dead_admin_sessions:
-                    # Если у сессии есть активный WebSocket — не удаляем.
-                    if a_session.session_id in manager.session_id_to_ws:
+                    # Если у админа есть активный WS (по owner-id), не удаляем сессию.
+                    if a_session.admin_id in ws_alive_admin_ids:
                         a_session.last_seen = datetime.now()
                         print(
-                            f"[Cleanup] Пинг не идет, но ws соединение есть — не считаем сессию мертвой "
+                            f"[Cleanup] Пинг от администратора не идет, но ws соединение есть — не считаем сессию мертвой "
                         )
                         continue
+
                     # Для админов просто удаляем устаревшие сессии
                     db.delete(a_session)
 
