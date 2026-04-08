@@ -46,6 +46,16 @@ function initWebSocket() {
 
     operatorSocket.onopen = () => {
         console.log("WebSocket подключен");
+        // Сразу отправляем heartbeat, чтобы сервер мог связать session_id с WS
+        // (даже если setInterval начнет работать с задержкой при background вкладке).
+        try {
+            const sid = sessionStorage.getItem("session_id");
+            if (sid) {
+                operatorSocket.send(JSON.stringify({ type: "ping", session_id: sid }));
+            }
+        } catch (e) {
+            console.debug("WS initial ping error:", e);
+        }
     };
 
     operatorSocket.onmessage = function(event) {

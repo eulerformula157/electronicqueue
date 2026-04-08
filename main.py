@@ -18,7 +18,6 @@ import json
 from datetime import datetime, timedelta
 import asyncio
 import secrets
-import time
 from passlib.context import CryptContext
 import bcrypt
 import shutil
@@ -48,6 +47,10 @@ app = FastAPI()
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Set[WebSocket] = set()
+        # session_id -> websocket (для heartbeat/idle ливнеса)
+        self.session_id_to_ws: dict[str, WebSocket] = {}
+        # websocket object id -> session_id
+        self.ws_id_to_session_id: dict[int, str] = {}
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -55,6 +58,11 @@ class ConnectionManager:
 
     def disconnect(self, websocket: WebSocket):
         self.active_connections.discard(websocket)
+        ws_id = id(websocket)
+        session_id = self.ws_id_to_session_id.pop(ws_id, None)
+        if session_id:
+            # Убираем ливнес-маппинг при отключении сокета
+            self.session_id_to_ws.pop(session_id, None)
 
     async def broadcast(self, message: dict):
         dead = []
@@ -1443,6 +1451,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     if session:
                         session.last_seen = datetime.now()
                         db.commit()
+                        # Сохраняем mapping сокет -> session_id
+                        ws_id = id(websocket)
+                        manager.ws_id_to_session_id[ws_id] = session_id
+                        manager.session_id_to_ws[session_id] = websocket
                     else:
                         # Если сессии нет в БД — уведомляем клиента и закрываем WS
                         await websocket.send_json({"type": "session_expired"})
@@ -1809,6 +1821,15 @@ async def cleanup_sessions():
                 need_board_update = False
 
                 for session in dead_sessions:
+                    # Если у сессии есть активный WebSocket (хоть и без регулярных ping),
+                    # считаем оператора живым и обновляем last_seen, чтобы cleanup не удалял.
+                    if session.session_id in manager.session_id_to_ws:
+                        session.last_seen = datetime.now()
+                        print(
+                            f"[Cleanup] Пинг не идет, но ws соединение есть — не считаем сессию мертвой "
+                        )
+                        continue
+
                     # Проверяем, есть ли ещё ЖИВЫЕ сессии этого оператора
                     other_alive = db.query(UserSession).filter(
                         UserSession.operator_id == session.operator_id,
@@ -1847,6 +1868,13 @@ async def cleanup_sessions():
             if dead_admin_sessions:
                 print(f"[Cleanup] Найдено мертвых сессий админов: {len(dead_admin_sessions)}")
                 for a_session in dead_admin_sessions:
+                    # Если у сессии есть активный WebSocket — не удаляем.
+                    if a_session.session_id in manager.session_id_to_ws:
+                        a_session.last_seen = datetime.now()
+                        print(
+                            f"[Cleanup] Пинг не идет, но ws соединение есть — не считаем сессию мертвой "
+                        )
+                        continue
                     # Для админов просто удаляем устаревшие сессии
                     db.delete(a_session)
 

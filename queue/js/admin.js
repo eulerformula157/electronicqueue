@@ -54,6 +54,15 @@ function initAdminWebSocket() {
 
     adminSocket.onopen = () => {
         console.log("Admin WS connected");
+        // Сразу отправляем heartbeat, чтобы сервер быстро привязал session_id к WS
+        try {
+            const sid = sessionStorage.getItem("session_id");
+            if (sid) {
+                adminSocket.send(JSON.stringify({ type: "ping", session_id: sid }));
+            }
+        } catch (e) {
+            console.debug("Admin WS initial ping error:", e);
+        }
     };
 
     adminSocket.onmessage = (event) => {
