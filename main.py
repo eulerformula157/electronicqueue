@@ -325,6 +325,68 @@ class PlaylistUpdate(BaseModel):
     index: int = None
     action: str # "add" or "delete"
 
+class SystemSettings(Base):
+    __tablename__ = "system_settings"
+    id = Column(Integer, primary_key=True, default=1)
+    print_ticket = Column(String, default="true")
+    show_print_badge = Column(String, default="true")
+    default_operator_status = Column(String, default="online")
+    active_ticket_on_operator_logout = Column(String, default="return_to_queue")
+    hide_services_without_online_operators = Column(String, default="true")
+
+class SystemSettingsUpdate(BaseModel):
+    print_ticket: bool
+    show_print_badge: bool
+    default_operator_status: str
+    active_ticket_on_operator_logout: str
+    hide_services_without_online_operators: bool
+
+class SystemSettingsResponse(BaseModel):
+    print_ticket: bool
+    show_print_badge: bool
+    default_operator_status: str
+    active_ticket_on_operator_logout: str
+    hide_services_without_online_operators: bool
+
+class PublicSettingsResponse(BaseModel):
+    print_ticket: bool
+    show_print_badge: bool
+
+
+def _str_to_bool(value: str, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return str(value).lower() in {"1", "true", "yes", "on"}
+
+
+def _bool_to_str(value: bool) -> str:
+    return "true" if value else "false"
+
+
+def get_or_create_system_settings(db: Session) -> SystemSettings:
+    settings = db.query(SystemSettings).filter(SystemSettings.id == 1).first()
+    if settings:
+        return settings
+
+    settings = SystemSettings(id=1)
+    db.add(settings)
+    db.commit()
+    db.refresh(settings)
+    return settings
+
+
+def get_system_settings_dict(db: Session) -> dict:
+    settings = get_or_create_system_settings(db)
+    return {
+        "print_ticket": _str_to_bool(settings.print_ticket, default=True),
+        "show_print_badge": _str_to_bool(settings.show_print_badge, default=True),
+        "default_operator_status": settings.default_operator_status or "online",
+        "active_ticket_on_operator_logout": settings.active_ticket_on_operator_logout or "return_to_queue",
+        "hide_services_without_online_operators": _str_to_bool(
+            settings.hide_services_without_online_operators, default=True
+        ),
+    }
+
 
 def sanitize_media_filename(filename: str) -> str:
     if not filename:
@@ -429,24 +491,24 @@ async def update_service_status(
 async def create_ticket(ticket: TicketCreate):
     db = SessionLocal()
     try:
+        settings = get_system_settings_dict(db)
         # 1. Проверяем существование услуги
         service = db.query(Service).filter(Service.id == ticket.service_id).first()
         if not service:
             raise HTTPException(status_code=404, detail="Услуга не найдена")
 
-        # 2. Проверяем, есть ли хоть одно работающее окно для этой услуги
-        # (Чтобы не выдавать талон, если комиссия закончила работу)
-        active_windows = (
-            db.query(Window)
-            .join(WindowService, Window.id == WindowService.window_id)
-            .filter(
-                WindowService.service_id == service.id,
-                Window.status == "online"
-            ).first()
-        )
-        
-        if not active_windows:
-            raise HTTPException(status_code=400, detail="В данный момент услуга не оказывается (нет активных окон)")
+        # 2. Если включено скрытие услуг без онлайн-операторов — валидируем доступность
+        if settings["hide_services_without_online_operators"]:
+            active_windows = (
+                db.query(Window)
+                .join(WindowService, Window.id == WindowService.window_id)
+                .filter(
+                    WindowService.service_id == service.id,
+                    Window.status == "online"
+                ).first()
+            )
+            if not active_windows:
+                raise HTTPException(status_code=400, detail="В данный момент услуга не оказывается (нет активных окон)")
 
         # 3. Создаем новый тикет
         # Номер тикета обычно генерируется автоматически (например, А001), 
@@ -1048,6 +1110,7 @@ async def delete_window_service(window_id: int, service_id: int, admin: Admin = 
 async def login(data: LoginRequest):
     db = SessionLocal()
     try:
+        settings = get_system_settings_dict(db)
         # 1. Сначала ищем в таблице администраторов ПО ЛОГИНУ
         admin = db.query(Admin).filter(Admin.login == data.login).first()
         
@@ -1118,11 +1181,11 @@ async def login(data: LoginRequest):
                 existing_session.last_seen = now
                 db.commit()
 
-                # Логика статуса окна (на входе гарантируем online)
+                # Логика статуса окна по настройке
                 if operator.window_id:
                     window = db.query(Window).filter(Window.id == operator.window_id).first()
                     if window:
-                        window.status = "online"
+                        window.status = settings["default_operator_status"]
                         db.flush()
                         update_services_status_for_window(db, window.id)
                         db.commit()
@@ -1163,11 +1226,11 @@ async def login(data: LoginRequest):
             db.commit()
             db.refresh(new_session)
 
-            # Логика статуса окна
+            # Логика статуса окна по настройке
             if operator.window_id:
                 window = db.query(Window).filter(Window.id == operator.window_id).first()
                 if window:
-                    window.status = "online"
+                    window.status = settings["default_operator_status"]
                     db.flush()
                     update_services_status_for_window(db, window.id)
                     db.commit()
@@ -1202,6 +1265,7 @@ async def login(data: LoginRequest):
 async def logout(session_id: str = Header(...)):
     db: Session = SessionLocal()
     try:
+        settings = get_system_settings_dict(db)
         # --- ЛОГИКА ДЛЯ ОПЕРАТОРОВ ---
         current_session = db.query(UserSession).filter(UserSession.session_id == session_id).first()
         
@@ -1216,6 +1280,18 @@ async def logout(session_id: str = Header(...)):
                     db.commit()
                     update_services_status_for_window(db, window.id)
                     await manager.broadcast({"type": "services_updated"})
+
+                if settings["active_ticket_on_operator_logout"] == "return_to_queue":
+                    active_ticket = db.query(Ticket).filter(
+                        Ticket.window_id == operator.window_id,
+                        Ticket.status == "called"
+                    ).first()
+                    if active_ticket:
+                        active_ticket.status = "waiting"
+                        active_ticket.window_id = None
+                        db.commit()
+                        asyncio.create_task(broadcast_board())
+                        await manager.broadcast({"type": "queue_updated"})
             
             # Удаляем сессии оператора
             db.query(UserSession).filter(UserSession.operator_id == operator_id).delete()
@@ -1580,6 +1656,7 @@ async def websocket_operator(websocket: WebSocket, operator_id: int):
         operatorManager.disconnect(operator_id)
 
         try:
+            settings = get_system_settings_dict(db)
             # удаляем все сессии этого оператора
             sessions = db.query(UserSession).filter(UserSession.operator_id == operator_id).all()
             for s in sessions:
@@ -1592,6 +1669,15 @@ async def websocket_operator(websocket: WebSocket, operator_id: int):
                 if window:
                     window.status = "offline"
                     update_services_status_for_window(db, window.id)
+
+                    if settings["active_ticket_on_operator_logout"] == "return_to_queue":
+                        active_ticket = db.query(Ticket).filter(
+                            Ticket.window_id == operator.window_id,
+                            Ticket.status == "called"
+                        ).first()
+                        if active_ticket:
+                            active_ticket.status = "waiting"
+                            active_ticket.window_id = None
 
             db.commit()
         except Exception as e:
@@ -1779,6 +1865,64 @@ async def list_media_files(admin: Admin = Depends(verify_admin_session)):
         "files": physical_files,
         "playlist": playlist
     } 
+
+@app.get("/admin/settings", response_model=SystemSettingsResponse, tags=["Admin"])
+async def get_admin_settings(admin: Admin = Depends(verify_admin_session)):
+    db = SessionLocal()
+    try:
+        return get_system_settings_dict(db)
+    finally:
+        db.close()
+
+
+@app.put("/admin/settings", response_model=SystemSettingsResponse, tags=["Admin"])
+async def update_admin_settings(
+    data: SystemSettingsUpdate,
+    admin: Admin = Depends(verify_admin_session)
+):
+    if data.default_operator_status not in {"online", "break", "offline"}:
+        raise HTTPException(status_code=400, detail="Некорректный default_operator_status")
+    if data.active_ticket_on_operator_logout not in {"return_to_queue", "keep_with_operator"}:
+        raise HTTPException(status_code=400, detail="Некорректный active_ticket_on_operator_logout")
+
+    db = SessionLocal()
+    try:
+        settings = get_or_create_system_settings(db)
+        settings.print_ticket = _bool_to_str(data.print_ticket)
+        settings.show_print_badge = _bool_to_str(data.show_print_badge)
+        settings.default_operator_status = data.default_operator_status
+        settings.active_ticket_on_operator_logout = data.active_ticket_on_operator_logout
+        settings.hide_services_without_online_operators = _bool_to_str(
+            data.hide_services_without_online_operators
+        )
+        db.commit()
+
+        if data.hide_services_without_online_operators:
+            all_window_ids = [row[0] for row in db.query(Window.id).all()]
+            for window_id in all_window_ids:
+                update_services_status_for_window(db, window_id)
+        else:
+            db.query(Service).update({Service.status: "active"})
+            db.commit()
+
+        await manager.broadcast({"type": "services_updated"})
+        await manager.broadcast({"type": "settings_updated"})
+        return get_system_settings_dict(db)
+    finally:
+        db.close()
+
+
+@app.get("/settings/public", response_model=PublicSettingsResponse, tags=["Settings"])
+async def get_public_settings():
+    db = SessionLocal()
+    try:
+        settings = get_system_settings_dict(db)
+        return {
+            "print_ticket": settings["print_ticket"],
+            "show_print_badge": settings["show_print_badge"]
+        }
+    finally:
+        db.close()
 # ------------------ Дополнительные функции ------------------
 
 def get_called_tickets():
@@ -1815,6 +1959,24 @@ async def broadcast_board():
             pass
 
 def update_services_status_for_window(db: Session, window_id: int):
+    settings = get_system_settings_dict(db)
+
+    # Если скрытие услуг отключено, услуги остаются доступными на терминале.
+    if not settings["hide_services_without_online_operators"]:
+        service_ids = [
+            row[0]
+            for row in db.query(WindowService.service_id)
+            .filter(WindowService.window_id == window_id)
+            .all()
+        ]
+        if service_ids:
+            db.query(Service).filter(Service.id.in_(service_ids)).update(
+                {Service.status: "active"},
+                synchronize_session=False
+            )
+        db.commit()
+        return
+
     # Получаем все услуги окна одним запросом.
     service_ids = [
         row[0]
@@ -1894,6 +2056,7 @@ async def cleanup_sessions():
         await asyncio.sleep(SESSION_TIMEOUT_SECONDS)
         db: Session = SessionLocal()
         try:
+            settings = get_system_settings_dict(db)
             timeout_datetime = datetime.now() - timedelta(seconds=SESSION_TIMEOUT_SECONDS)
             mapped_session_ids = list(manager.session_id_to_ws.keys())
             ws_alive_operator_ids = set()
@@ -1947,7 +2110,7 @@ async def cleanup_sessions():
                             Ticket.status == "called"
                         ).first()
 
-                        if active_ticket:
+                        if active_ticket and settings["active_ticket_on_operator_logout"] == "return_to_queue":
                             active_ticket.status = "waiting"
                             active_ticket.window_id = None
                             need_board_update = True
@@ -2010,6 +2173,17 @@ async def startup():
     asyncio.create_task(cleanup_sessions())
  
 
+def ensure_system_settings_columns():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "ALTER TABLE system_settings "
+                "ADD COLUMN IF NOT EXISTS show_print_badge VARCHAR DEFAULT 'true'"
+            )
+        )
+
+
 
 # ------------------ Создание таблиц ------------------
 Base.metadata.create_all(bind=engine)
+ensure_system_settings_columns()

@@ -448,26 +448,32 @@ function updateStatusButtons(status) {
     const statusDot = document.getElementById("status-dot");
 
     // Базовый сброс для всех состояний
+    startBtn.classList.remove("status-active");
+    stopBtn.classList.remove("btn-warning-active");
+    statusDot.className = "dot";
     statusDot.style.boxShadow = "none";
-    statusDot.style.backgroundColor = ""; 
+    statusDot.style.backgroundColor = "";
 
     if (status === "online") {
         startBtn.classList.add("status-active");
-        stopBtn.classList.remove("btn-warning-active");
-        
         statusDot.className = "dot online";
         statusText.textContent = "В сети";
         statusText.style.color = "var(--success)";
-    } else {
-        startBtn.classList.remove("status-active");
+        return;
+    }
+
+    if (status === "break") {
         stopBtn.classList.add("btn-warning-active");
-        
-        statusDot.className = "dot"; 
-        statusDot.style.backgroundColor = "var(--warning)"; 
+        statusDot.style.backgroundColor = "var(--warning)";
         statusDot.style.boxShadow = "0 0 8px var(--warning)";
         statusText.textContent = "На перерыве";
         statusText.style.color = "var(--warning)";
+        return;
     }
+
+    // offline / неизвестный статус
+    statusText.textContent = "Оффлайн";
+    statusText.style.color = "var(--text-muted)";
 }
 
 async function loadCurrentTicket() {

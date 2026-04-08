@@ -14,6 +14,10 @@ function connectSocket() {
         const data = JSON.parse(event.data);
         if (data.type === "services_updated") {
             loadServices();
+            loadTerminalSettings();
+        }
+        if (data.type === "settings_updated") {
+            loadTerminalSettings();
         }
     };
 
@@ -21,6 +25,46 @@ function connectSocket() {
 }
 
 let socket = connectSocket();
+let terminalSettings = {
+    print_ticket: true,
+    show_print_badge: true
+};
+
+function renderPrintModeBadge() {
+    const badge = document.getElementById("print-mode-badge");
+    if (!badge) return;
+
+    if (!terminalSettings.show_print_badge) {
+        badge.style.display = "none";
+        return;
+    }
+
+    badge.style.display = "block";
+    if (terminalSettings.print_ticket) {
+        badge.textContent = "Печать: ВКЛ";
+        badge.style.background = "rgba(40, 167, 69, 0.92)";
+    } else {
+        badge.textContent = "Печать: ВЫКЛ";
+        badge.style.background = "rgba(108, 117, 125, 0.92)";
+    }
+}
+
+async function loadTerminalSettings() {
+    try {
+        const res = await fetch(`${CONFIG.API_URL}/settings/public`);
+        if (!res.ok) {
+            renderPrintModeBadge();
+            return;
+        }
+        const data = await res.json();
+        terminalSettings.print_ticket = data.print_ticket !== false;
+        terminalSettings.show_print_badge = data.show_print_badge !== false;
+        renderPrintModeBadge();
+    } catch (error) {
+        console.warn("Не удалось загрузить публичные настройки терминала:", error);
+        renderPrintModeBadge();
+    }
+}
 
 // --- Загрузка услуг ---
 async function loadServices() {
@@ -68,6 +112,10 @@ async function createTicket(serviceId, serviceName) {
     buttons.forEach(btn => btn.disabled = true);
 
     try {
+        // Берем актуальное значение перед созданием талона,
+        // чтобы настройка из админки применялась сразу.
+        await loadTerminalSettings();
+
         const response = await fetch(`${CONFIG.API_URL}/tickets/`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -108,7 +156,9 @@ async function createTicket(serviceId, serviceName) {
                 : "ВЫ СЛЕДУЮЩИЙ В ОЧЕРЕДИ!";
         }
 
-        printTicket();
+        if (terminalSettings.print_ticket) {
+            printTicket();
+        }
         
         if (socket.readyState === WebSocket.OPEN) {
             socket.send(JSON.stringify({ type: "queue_updated" }));
@@ -186,4 +236,5 @@ document.addEventListener('click', () => {
 }, { once: true });
 
 // --- Инициализация ---
+loadTerminalSettings();
 loadServices();

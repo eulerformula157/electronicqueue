@@ -139,3 +139,18 @@ button.service-btn.unavailable {
     background: #fff;
     color: #000;
 }
+
+.print-mode-badge {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 10001;
+    background: rgba(0, 51, 102, 0.9);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 8px 12px;
+    border-radius: 999px;
+    box-shadow: var(--shadow);
+    user-select: none;
+}
