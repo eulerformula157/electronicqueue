@@ -173,7 +173,7 @@ app.add_middleware(
     allow_origins=CORS_ORIGINS,  
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*"], 
 )
 
 
@@ -238,6 +238,7 @@ class UserSession(Base):
     operator_id = Column(Integer, ForeignKey("operators.id"))
     created_at = Column(TIMESTAMP, server_default=text("NOW()"), nullable=False)
     last_seen = Column(TIMESTAMP, server_default=text("NOW()"), nullable=False)
+    is_expirable = Column(Integer, default=1)
 
 class Admin(Base):
     __tablename__ = "admins"
@@ -2069,6 +2070,7 @@ async def cleanup_sessions():
             mapped_session_ids = list(manager.session_id_to_ws.keys())
             ws_alive_operator_ids = set()
             ws_alive_admin_ids = set()
+            
             if mapped_session_ids:
                 ws_user_rows = (
                     db.query(UserSession.operator_id)
@@ -2084,21 +2086,22 @@ async def cleanup_sessions():
                 ws_alive_admin_ids = {row[0] for row in ws_admin_rows if row and row[0] is not None}
 
             # --- ЧАСТЬ 1: ОПЕРАТОРЫ ---
-            dead_sessions = db.query(UserSession).filter(UserSession.last_seen < timeout_datetime).all()
+            # Добавляем фильтр .filter(UserSession.is_expirable == 1)
+            # Сессии с is_expirable=0 (терминалы) база просто не вернет в этом списке
+            dead_sessions = db.query(UserSession).filter(
+                UserSession.last_seen < timeout_datetime,
+                UserSession.is_expirable == 1  # <--- Игнорируем вечные сессии
+            ).all()
+            
             if dead_sessions:
                 print(f"\n[Cleanup] Найдено мертвых сессий операторов: {len(dead_sessions)}")
                 need_board_update = False
 
                 for session in dead_sessions:
-                    # Если у оператора есть активный WS (по owner-id), не удаляем сессию.
                     if session.operator_id in ws_alive_operator_ids:
                         session.last_seen = datetime.now()
-                        print(
-                            f"[Cleanup] Пинг от оператора не идет, но ws соединение есть — не считаем сессию мертвой "
-                        )
                         continue
 
-                    # Проверяем, есть ли ещё ЖИВЫЕ сессии этого оператора
                     other_alive = db.query(UserSession).filter(
                         UserSession.operator_id == session.operator_id,
                         UserSession.last_seen >= timeout_datetime,
@@ -2106,11 +2109,9 @@ async def cleanup_sessions():
                     ).first()
 
                     if other_alive:
-                        # У оператора есть другая живая сессия — просто удаляем устаревшую запись
                         db.delete(session)
                         continue
 
-                    # Если других живых сессий нет — действительно считаем оператора "ушедшим"
                     operator = db.query(Operator).filter(Operator.id == session.operator_id).first()
                     if operator and operator.window_id:
                         active_ticket = db.query(Ticket).filter(
@@ -2130,26 +2131,24 @@ async def cleanup_sessions():
 
                     db.delete(session)
 
-            # --- ЧАСТЬ 2: АДМИНИСТРАТОРЫ ---
-            # Предполагается, что модель называется AdminSession
-            dead_admin_sessions = db.query(AdminSession).filter(AdminSession.last_seen < timeout_datetime).all()
+            # --- ЧАСТЬ 2: АДМИНИСТРАТОРЫ / ТЕРМИНАЛЫ ---
+            # Аналогично добавляем фильтр AdminSession.is_expirable == 1
+            dead_admin_sessions = db.query(AdminSession).filter(
+                AdminSession.last_seen < timeout_datetime,
+                AdminSession.is_expirable == 1  # <--- Игнорируем терминалы
+            ).all()
+            
             if dead_admin_sessions:
                 print(f"[Cleanup] Найдено мертвых сессий админов: {len(dead_admin_sessions)}")
                 for a_session in dead_admin_sessions:
-                    # Если у админа есть активный WS (по owner-id), не удаляем сессию.
                     if a_session.admin_id in ws_alive_admin_ids:
                         a_session.last_seen = datetime.now()
-                        print(
-                            f"[Cleanup] Пинг от администратора не идет, но ws соединение есть — не считаем сессию мертвой "
-                        )
                         continue
 
-                    # Для админов просто удаляем устаревшие сессии
                     db.delete(a_session)
 
             db.commit()
 
-            # Общие уведомления
             if dead_sessions:
                 await manager.broadcast({"type": "services_updated"})
                 if need_board_update:
