@@ -2183,7 +2183,25 @@ def ensure_system_settings_columns():
         )
 
 
+def ensure_admin_sessions_columns():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "ALTER TABLE admin_sessions "
+                "ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP DEFAULT NOW()"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE admin_sessions "
+                "SET last_seen = NOW() "
+                "WHERE last_seen IS NULL"
+            )
+        )
+
+
 
 # ------------------ Создание таблиц ------------------
 Base.metadata.create_all(bind=engine)
 ensure_system_settings_columns()
+ensure_admin_sessions_columns()

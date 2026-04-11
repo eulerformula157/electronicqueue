@@ -644,11 +644,13 @@ async function saveOperatorName(id){
 
 let name=document.getElementById(`nameInput-${id}`).value
 
-await fetch(`${API}/operators/${id}`,{
+const res = await fetchJSON(`${API}/operators/${id}`,{
 method:"PATCH",
 headers:{"Content-Type":"application/json"},
 body:JSON.stringify({name})
-})
+});
+
+if (!res) return;
 
 loadOperators()
 }
@@ -685,13 +687,26 @@ async function saveOperatorWindow(id){
 let val=document.getElementById(`windowSelect-${id}`).value
 let window_id=val===""?null:parseInt(val)
 
-let r=await fetch(`${API}/operators/${id}`,{
+const r = await fetch(`${API}/operators/${id}`,{
 method:"PATCH",
-headers:{"Content-Type":"application/json"},
+headers:{
+    "Content-Type":"application/json",
+    "session-id": sessionStorage.getItem("session_id")
+},
 body:JSON.stringify({window_id})
-})
+});
 
-if(!r.ok)alert("Окно занято")
+if(!r.ok){
+  if (r.status === 401 || r.status === 403) {
+    alert("Сессия истекла или недостаточно прав. Войдите снова.");
+    window.location.href = "login.html";
+    return;
+  }
+  let err = {};
+  try { err = await r.json(); } catch (_) {}
+  alert(err.detail || "Не удалось сохранить окно оператора");
+  return;
+}
 
 loadOperators()
 }
@@ -1064,32 +1079,8 @@ async function saveExtraSettings() {
 }
 
 function loadStats() {
-    const content = document.querySelector(".content");
-    const form = document.getElementById("form");
-    const table = document.getElementById("table");
-
-    // 1. Скрываем стандартные блоки формы и таблицы
-    if (form) form.style.display = "none";
-    if (table) table.style.display = "none";
-
-    // 2. Удаляем старое окно статистики, если оно уже было создано ранее
-    const oldStats = document.getElementById("stats-container");
-    if (oldStats) oldStats.remove();
-
-    // 3. Создаем новый контейнер для статистики
-    const statsContainer = document.createElement("div");
-    statsContainer.id = "stats-container";
-    
-    // Добавляем заголовок и iframe
-    statsContainer.innerHTML = `
-        <iframe src="${GRAFANA}" 
-                style="width:100%; height:840px; border:none; border-radius:16px; box-shadow:var(--shadow);">
-        </iframe>
-    `;
-    
-    content.appendChild(statsContainer);
-    
-    // Подсветка таба (если у вас есть функция setActiveTab)
+    // Открываем Grafana в новой вкладке вместо embedded-режима.
+    window.open(GRAFANA, "_blank", "noopener,noreferrer");
     setActiveTab('tab-stats');
 }
 
