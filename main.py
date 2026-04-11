@@ -248,9 +248,11 @@ class Admin(Base):
 
 class AdminSession(Base):
     __tablename__ = "admin_sessions"
-    session_id = Column(String, primary_key=True)
-    admin_id = Column(Integer, ForeignKey("admins.id"))
-    last_seen = Column(TIMESTAMP, server_default=text("NOW()"), onupdate=text("NOW()"))
+    session_id = Column(String, primary_key=True) 
+    admin_id = Column(Integer, ForeignKey("admins.id"), unique=True, index=True) 
+    created_at = Column(TIMESTAMP, default=datetime.now)
+    last_seen = Column(TIMESTAMP, default=datetime.now)
+    is_expirable = Column(Integer, default=1)
 
 class PriorityUpdate(BaseModel):
     window_id: int
@@ -486,19 +488,45 @@ async def update_service_status(
         return {"id": service.id, "status": service.status}
     finally:
         db.close()
-  
+ 
+
+def get_current_terminal(session_id: str = Header(None)):
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Session ID missing")
+    
+    db = SessionLocal()
+    try:
+        # 1. Ищем сессию в таблице пользовательских сессий (для операторов/терминалов)
+        session = db.query(UserSession).filter(UserSession.session_id == session_id).first()
+        
+        # 2. Если не нашли, проверяем таблицу админских сессий
+        if not session:
+            session = db.query(AdminSession).filter(AdminSession.session_id == session_id).first()
+
+        if not session:
+            raise HTTPException(status_code=401, detail="Invalid session")
+        
+        return session
+    finally:
+        db.close()
+ 
 @app.post("/tickets/", tags=["Tickets"])
-async def create_ticket(ticket: TicketCreate):
+async def create_ticket(
+    ticket: TicketCreate,
+    # Защита: проверяем, что запрос идет от авторизованного терминала
+    _auth = Depends(get_current_terminal) 
+):
     db = SessionLocal()
     try:
         settings = get_system_settings_dict(db)
+        
         # 1. Проверяем существование услуги
         service = db.query(Service).filter(Service.id == ticket.service_id).first()
         if not service:
             raise HTTPException(status_code=404, detail="Услуга не найдена")
 
-        # 2. Если включено скрытие услуг без онлайн-операторов — валидируем доступность
-        if settings["hide_services_without_online_operators"]:
+        # 2. Валидация доступности окон
+        if settings.get("hide_services_without_online_operators"):
             active_windows = (
                 db.query(Window)
                 .join(WindowService, Window.id == WindowService.window_id)
@@ -508,35 +536,34 @@ async def create_ticket(ticket: TicketCreate):
                 ).first()
             )
             if not active_windows:
-                raise HTTPException(status_code=400, detail="В данный момент услуга не оказывается (нет активных окон)")
+                raise HTTPException(
+                    status_code=400, 
+                    detail="В данный момент услуга не оказывается (нет активных окон)"
+                )
 
-        # 3. Создаем новый тикет
-        # Номер тикета обычно генерируется автоматически (например, А001), 
-        # предполагаю, что у тебя это настроено в модели или БД
+        # 3. Создаем тикет
         db_ticket = Ticket(
             service_id=service.id,
             status="waiting",
-            created_at=datetime.now() # Важно для корректного подсчета очереди
+            created_at=datetime.now()
         )
         
         db.add(db_ticket)
         db.commit()
         db.refresh(db_ticket)
 
-        # 4. Считаем сколько людей в очереди ПЕРЕД этим талоном
-        # Считаем только тех, кто в статусе 'waiting' и был создан раньше
+        # 4. Считаем людей перед талоном
         waiting_before = db.query(Ticket).filter(
             Ticket.status == "waiting",
             Ticket.id < db_ticket.id
         ).count()
 
-        # 5. Уведомляем табло и операторов об обновлении очереди
+        # 5. Рассылка уведомлений
         await manager.broadcast({
             "type": "queue_updated",
             "service_id": service.id
         })
 
-        # 6. Формируем расширенный ответ для терминала
         return {
             "id": db_ticket.id,
             "number": db_ticket.number,
@@ -545,6 +572,8 @@ async def create_ticket(ticket: TicketCreate):
             "date": datetime.now().strftime("%d.%m.%Y %H:%M")
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -1111,18 +1140,16 @@ async def login(data: LoginRequest):
     db = SessionLocal()
     try:
         settings = get_system_settings_dict(db)
-        # 1. Сначала ищем в таблице администраторов ПО ЛОГИНУ
+        now = datetime.now()
+        timeout_datetime = now - timedelta(seconds=SESSION_TIMEOUT_SECONDS)
+
+        # 1. Сначала ищем в таблице администраторов (включает терминалы)
         admin = db.query(Admin).filter(Admin.login == data.login).first()
         
-        # Проверяем хэшированный пароль админа
         if admin and verify_password(data.password, admin.password):
-            # Роль теперь берется из поля status (admin или terminal)
-            user_role = admin.status 
+            user_role = admin.status # admin или terminal
+            is_expirable = 0 if user_role == "terminal" else 1
             
-            now = datetime.now()
-            timeout_datetime = now - timedelta(seconds=SESSION_TIMEOUT_SECONDS)
-
-            # Проверка существующей сессии
             existing_session = (
                 db.query(AdminSession)
                 .filter(AdminSession.admin_id == admin.id)
@@ -1132,9 +1159,9 @@ async def login(data: LoginRequest):
 
             if existing_session and existing_session.last_seen and existing_session.last_seen >= timeout_datetime:
                 existing_session.last_seen = now
+                existing_session.is_expirable = is_expirable
                 db.commit()
 
-                # Удаляем дубликаты
                 db.query(AdminSession).filter(
                     AdminSession.admin_id == admin.id,
                     AdminSession.session_id != existing_session.session_id
@@ -1147,28 +1174,28 @@ async def login(data: LoginRequest):
                     "role": user_role
                 }
 
-            # Создание новой сессии
+            # Создание новой сессии (удалили лишний login=admin.login)
             db.query(AdminSession).filter(AdminSession.admin_id == admin.id).delete()
             db.flush()
 
             token = secrets.token_hex(32)
-            new_session = AdminSession(session_id=token, admin_id=admin.id)
+            new_session = AdminSession(
+                session_id=token, 
+                admin_id=admin.id,
+                last_seen=now,
+                is_expirable=is_expirable
+            )
             db.add(new_session)
             db.commit()
 
-            return {
-                "session_id": token,
-                "status": admin.status,
-                "role": user_role
-            }
+            return {"session_id": token, "status": admin.status, "role": user_role}
             
-        # 2. Если не админ, ищем в операторах ПО ЛОГИНУ
+        # 2. Ищем в операторах
         operator = db.query(Operator).filter(Operator.login == data.login).first()
         
         if operator and verify_password(data.password, operator.password):
-            now = datetime.now()
-            timeout_datetime = now - timedelta(seconds=SESSION_TIMEOUT_SECONDS)
-
+            is_expirable = 1 # Операторы всегда протухают
+            
             existing_session = (
                 db.query(UserSession)
                 .filter(UserSession.operator_id == operator.id)
@@ -1178,8 +1205,11 @@ async def login(data: LoginRequest):
 
             if existing_session and existing_session.last_seen and existing_session.last_seen >= timeout_datetime:
                 existing_session.last_seen = now
+                # Поле is_expirable должно быть в модели UserSession!
+                existing_session.is_expirable = is_expirable 
                 db.commit()
 
+                # Обновляем статус окна если нужно
                 if operator.window_id:
                     window = db.query(Window).filter(Window.id == operator.window_id).first()
                     if window:
@@ -1187,10 +1217,7 @@ async def login(data: LoginRequest):
                         db.flush()
                         update_services_status_for_window(db, window.id)
                         db.commit()
-                        await manager.broadcast({
-                            "type": "services_updated",
-                            "window_id": operator.window_id
-                        })
+                        await manager.broadcast({"type": "services_updated", "window_id": operator.window_id})
                     else:
                         db.commit()
                 else:
@@ -1202,13 +1229,9 @@ async def login(data: LoginRequest):
                 ).delete()
                 db.commit()
 
-                return {
-                    "session_id": existing_session.session_id,
-                    "name": operator.name,
-                    "window_id": operator.window_id,
-                    "role": "operator"
-                }
+                return {"session_id": existing_session.session_id, "name": operator.name, "window_id": operator.window_id, "role": "operator"}
 
+            # Создание новой сессии оператора (убрали несуществующий created_at)
             db.query(UserSession).filter(UserSession.operator_id == operator.id).delete()
             db.flush()
 
@@ -1216,11 +1239,11 @@ async def login(data: LoginRequest):
             new_session = UserSession(
                 session_id=token,
                 operator_id=operator.id,
-                created_at=now
+                last_seen=now,
+                is_expirable=is_expirable
             )
             db.add(new_session)
             db.commit()
-            db.refresh(new_session)
 
             if operator.window_id:
                 window = db.query(Window).filter(Window.id == operator.window_id).first()
@@ -1229,28 +1252,19 @@ async def login(data: LoginRequest):
                     db.flush()
                     update_services_status_for_window(db, window.id)
                     db.commit()
-                    await manager.broadcast({
-                        "type": "services_updated",
-                        "window_id": operator.window_id
-                    })
+                    await manager.broadcast({"type": "services_updated", "window_id": operator.window_id})
                 else:
                     db.commit()
             else:
                 db.commit()
 
-            return {
-                "session_id": token,
-                "name": operator.name,
-                "window_id": operator.window_id,
-                "role": "operator"
-            }
+            return {"session_id": token, "name": operator.name, "window_id": operator.window_id, "role": "operator"}
 
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
 
     except Exception as e:
         db.rollback()
-        if isinstance(e, HTTPException): 
-            raise e
+        if isinstance(e, HTTPException): raise e
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
@@ -2167,35 +2181,6 @@ async def startup():
     asyncio.create_task(cleanup_sessions())
  
 
-def ensure_system_settings_columns():
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                "ALTER TABLE system_settings "
-                "ADD COLUMN IF NOT EXISTS show_print_badge VARCHAR DEFAULT 'true'"
-            )
-        )
-
-
-def ensure_admin_sessions_columns():
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                "ALTER TABLE admin_sessions "
-                "ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP DEFAULT NOW()"
-            )
-        )
-        conn.execute(
-            text(
-                "UPDATE admin_sessions "
-                "SET last_seen = NOW() "
-                "WHERE last_seen IS NULL"
-            )
-        )
-
-
 
 # ------------------ Создание таблиц ------------------
 Base.metadata.create_all(bind=engine)
-ensure_system_settings_columns()
-ensure_admin_sessions_columns()

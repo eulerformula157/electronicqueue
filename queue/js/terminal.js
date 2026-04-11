@@ -27,7 +27,7 @@ async function performTerminalLogin(login, password, isAuto = false) {
         // Важно: проверяем, что это именно терминал!
         if (response.ok && data.role === "terminal") {
             // Сохраняем сессию для текущей работы
-            sessionStorage.setItem("session_id", data.session_id);
+            localStorage.setItem("session_id", data.session_id);
             
             // Сохраняем логин/пароль "навечно" для авто-входа
             localStorage.setItem("terminal_credential_login", login);
@@ -179,40 +179,53 @@ async function createTicket(serviceId, serviceName) {
     const buttons = document.querySelectorAll(".service-btn");
     buttons.forEach(btn => btn.disabled = true);
 
-    try {
-        // Берем актуальное значение перед созданием талона,
-        // чтобы настройка из админки применялась сразу.
-        await loadTerminalSettings();
+    // Достаем токен сессии
+	const currentSession = localStorage.getItem("session_id");
 
-        const response = await fetch(`${CONFIG.API_URL}/tickets/`, {
+    if (!currentSession) {
+        showNotice("Ошибка: Сессия не найдена. Войдите заново.", 5);
+        document.getElementById("terminal-auth-overlay").style.display = "flex";
+        return;
+    }
+
+    try {
+        const response = await fetch(`${CONFIG.API_URL}/tickets`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { 
+                "Content-Type": "application/json",
+                "session-id": currentSession
+            },
             body: JSON.stringify({ service_id: serviceId })
         });
 
         const data = await response.json();
 
-        if (!response.ok || data.error) {
-            const errorMsg = data.detail || data.error || "Нет доступных специалистов";
+        // Обработка ошибок 
+        if (!response.ok) {
+            if (response.status === 401) {
+                showNotice("Сессия истекла. Требуется повторный вход.", 5);
+                // Можно вызвать логаут или показать форму входа
+                return;
+            }
+            const errorMsg = data.detail || data.error || "Ошибка создания талона";
             showNotice(errorMsg, 3);
             return; 
         }
 
+        // Настройка форматирования даты
+        const dateOptions = { 
+            weekday: 'long', 
+            day: 'numeric', 
+            month: 'long', 
+            year: 'numeric', 
+            hour: '2-digit', 
+            minute: '2-digit', 
+            second: '2-digit' 
+        };
 
-		// Настройка форматирования даты
-		const dateOptions = { 
-			weekday: 'long', 
-			day: 'numeric', 
-			month: 'long', 
-			year: 'numeric', 
-			hour: '2-digit', 
-			minute: '2-digit', 
-			second: '2-digit' 
-		};
+        const formattedDate = new Date().toLocaleString('ru-RU', dateOptions).replace(' г.', 'г.');
 
-		// Формируем строку даты (например: воскресенье, 29 марта 2026 г., 08:15:00)
-		const formattedDate = new Date().toLocaleString('ru-RU', dateOptions).replace(' г.', 'г.');
-
+        // Заполнение данными для печати
         document.getElementById("receipt-number").textContent = data.number;
         document.getElementById("receipt-service").textContent = data.service_name || serviceName;
         document.getElementById("receipt-date").textContent = formattedDate;
@@ -224,10 +237,12 @@ async function createTicket(serviceId, serviceName) {
                 : "ВЫ СЛЕДУЮЩИЙ В ОЧЕРЕДИ!";
         }
 
+        // Печать, если включена в админке
         if (terminalSettings.print_ticket) {
             printTicket();
         }
         
+        // Уведомляем другие модули через сокет
         if (socket.readyState === WebSocket.OPEN) {
             socket.send(JSON.stringify({ type: "queue_updated" }));
         }
@@ -238,6 +253,7 @@ async function createTicket(serviceId, serviceName) {
         console.error("Ошибка при создании билета:", error);
         showNotice("Сбой связи с сервером.", 4);
     } finally {
+        // Разблокировка кнопок
         buttons.forEach(btn => {
             if (!btn.classList.contains("unavailable")) {
                 btn.disabled = false;
