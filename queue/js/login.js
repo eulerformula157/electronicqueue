@@ -104,11 +104,16 @@ async function submitLogin() {
 
         sessionStorage.setItem("session_id", data.session_id);
 
-        if (data.role === "admin") {
-            window.location.href = "/queue/admin.html";
-        } else {
-            window.location.href = "/queue/operator.html";
-        }
+		if (data.role === "admin") {
+			window.location.href = "/queue/admin.html";
+		} else if (data.role === "operator") {
+			window.location.href = "/queue/operator.html";
+		} else if (data.role === "terminal") {
+			// Если кто-то пытается зайти под терминалом через общую страницу логина
+			throw new Error("Этот аккаунт предназначен только для терминалов самообслуживания");
+		} else {
+			throw new Error("Ошибка статуса аккаунта. Обратитесь к ответсвенному программисту");	
+		}
 
     } catch (error) {
         errorDiv.textContent = error.message;

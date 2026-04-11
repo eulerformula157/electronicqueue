@@ -108,6 +108,17 @@
         <source src="https://raw.githubusercontent.com/anars/blank-audio/master/10-seconds-of-silence.mp3" type="audio/mp3">
     </audio>
 
+<div id="terminal-auth-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:#f4f4f9; z-index:10000; flex-direction:column; align-items:center; justify-content:center; font-family: sans-serif;">
+    <div style="background:white; padding:40px; border-radius:15px; box-shadow:0 10px 25px rgba(0,0,0,0.1); text-align:center; width: 350px;">
+        <h2 style="margin-bottom:20px; color:#333;">Активация терминала</h2>
+        <input type="text" id="term-login" placeholder="Логин терминала" style="width:100%; padding:12px; margin-bottom:15px; border:1px solid #ddd; border-radius:8px; box-sizing: border-box;">
+        <input type="password" id="term-password" placeholder="Пароль" style="width:100%; padding:12px; margin-bottom:20px; border:1px solid #ddd; border-radius:8px; box-sizing: border-box;">
+        <button onclick="handleTerminalManualLogin()" id="term-auth-btn" style="width:100%; padding:12px; background:#28a745; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold;">Войти</button>
+        <p id="term-auth-error" style="color:red; margin-top:15px; font-size:14px;"></p>
+    </div>
+</div>
+
+
     <h1>Выберите услугу</h1>
     
     <div id="services">Загрузка услуг...</div>
@@ -133,6 +144,8 @@
         <div id="receipt-date"></div>
         <div class="footer-spacer"></div>
     </div>
+
+
 
     <script src="/queue/js/config.js"></script>
     <script src="/queue/js/terminal.js"></script>

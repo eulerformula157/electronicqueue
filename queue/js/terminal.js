@@ -1,3 +1,71 @@
+// Автоматическая проверка авторизации при загрузке
+document.addEventListener("DOMContentLoaded", async () => {
+    const savedLogin = localStorage.getItem("terminal_credential_login");
+    const savedPass = localStorage.getItem("terminal_credential_pass");
+
+    if (savedLogin && savedPass) {
+        // Если данные есть, пробуем войти в фоне
+        await performTerminalLogin(savedLogin, savedPass, true);
+    } else {
+        // Если данных нет, показываем окно входа
+        document.getElementById("terminal-auth-overlay").style.display = "flex";
+    }
+});
+
+// Функция входа
+async function performTerminalLogin(login, password, isAuto = false) {
+    const errorEl = document.getElementById("term-auth-error");
+    try {
+        const response = await fetch(`${CONFIG.API_URL}/login`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ login, password })
+        });
+
+        const data = await response.json();
+
+        // Важно: проверяем, что это именно терминал!
+        if (response.ok && data.role === "terminal") {
+            // Сохраняем сессию для текущей работы
+            sessionStorage.setItem("session_id", data.session_id);
+            
+            // Сохраняем логин/пароль "навечно" для авто-входа
+            localStorage.setItem("terminal_credential_login", login);
+            localStorage.setItem("terminal_credential_pass", password);
+            
+            // Скрываем окно и загружаем данные терминала
+            document.getElementById("terminal-auth-overlay").style.display = "none";
+            
+            // Твои стандартные функции инициализации
+            loadServices();
+            loadTerminalSettings();
+        } else {
+            throw new Error(data.detail || "Доступ запрещен или это не терминал");
+        }
+    } catch (err) {
+        console.error("Auth error:", err);
+        if (isAuto) {
+            // Если авто-вход не сработал (например, пароль изменили), сбрасываем и просим ввод
+            localStorage.removeItem("terminal_credential_login");
+            localStorage.removeItem("terminal_credential_pass");
+        }
+        document.getElementById("terminal-auth-overlay").style.display = "flex";
+        errorEl.textContent = err.message;
+    }
+}
+
+// Вызывается при нажатии на кнопку в форме
+async function handleTerminalManualLogin() {
+    const login = document.getElementById("term-login").value;
+    const pass = document.getElementById("term-password").value;
+    const btn = document.getElementById("term-auth-btn");
+    
+    btn.disabled = true;
+    await performTerminalLogin(login, pass);
+    btn.disabled = false;
+}
+
+
 function connectSocket() {
     // Используем URL из конфига
     const socket = new WebSocket(CONFIG.WS_TERMINAL_URL);

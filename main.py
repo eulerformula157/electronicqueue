@@ -241,10 +241,10 @@ class UserSession(Base):
 
 class Admin(Base):
     __tablename__ = "admins"
-    id = Column(Integer, primary_key=True)
-    login = Column(String, unique=True)
+    id = Column(Integer, primary_key=True, index=True)
+    login = Column(String, unique=True, index=True)
     password = Column(String)
-    name = Column(String)
+    status = Column(String)
 
 class AdminSession(Base):
     __tablename__ = "admin_sessions"
@@ -1116,11 +1116,13 @@ async def login(data: LoginRequest):
         
         # Проверяем хэшированный пароль админа
         if admin and verify_password(data.password, admin.password):
+            # Роль теперь берется из поля status (admin или terminal)
+            user_role = admin.status 
+            
             now = datetime.now()
             timeout_datetime = now - timedelta(seconds=SESSION_TIMEOUT_SECONDS)
 
-            # Если у админа уже есть "свежая" сессия — переиспользуем ее,
-            # чтобы избежать дублей при double-submit логина.
+            # Проверка существующей сессии
             existing_session = (
                 db.query(AdminSession)
                 .filter(AdminSession.admin_id == admin.id)
@@ -1132,7 +1134,7 @@ async def login(data: LoginRequest):
                 existing_session.last_seen = now
                 db.commit()
 
-                # Удаляем другие "лишние" дубликаты, чтобы браузер всегда работал с одним токеном
+                # Удаляем дубликаты
                 db.query(AdminSession).filter(
                     AdminSession.admin_id == admin.id,
                     AdminSession.session_id != existing_session.session_id
@@ -1141,11 +1143,11 @@ async def login(data: LoginRequest):
 
                 return {
                     "session_id": existing_session.session_id,
-                    "name": admin.name,
-                    "role": "admin"
+                    "status": admin.status,
+                    "role": user_role
                 }
 
-            # Иначе создаем новую сессию (старые чистим)
+            # Создание новой сессии
             db.query(AdminSession).filter(AdminSession.admin_id == admin.id).delete()
             db.flush()
 
@@ -1156,20 +1158,17 @@ async def login(data: LoginRequest):
 
             return {
                 "session_id": token,
-                "name": admin.name,
-                "role": "admin"
+                "status": admin.status,
+                "role": user_role
             }
             
         # 2. Если не админ, ищем в операторах ПО ЛОГИНУ
         operator = db.query(Operator).filter(Operator.login == data.login).first()
         
-        # Проверяем хэшированный пароль оператора
         if operator and verify_password(data.password, operator.password):
             now = datetime.now()
             timeout_datetime = now - timedelta(seconds=SESSION_TIMEOUT_SECONDS)
 
-            # Если у оператора уже есть "свежая" сессия — переиспользуем ее,
-            # чтобы избежать ситуации с двумя сессиями при double-submit логина.
             existing_session = (
                 db.query(UserSession)
                 .filter(UserSession.operator_id == operator.id)
@@ -1181,7 +1180,6 @@ async def login(data: LoginRequest):
                 existing_session.last_seen = now
                 db.commit()
 
-                # Логика статуса окна по настройке
                 if operator.window_id:
                     window = db.query(Window).filter(Window.id == operator.window_id).first()
                     if window:
@@ -1198,7 +1196,6 @@ async def login(data: LoginRequest):
                 else:
                     db.commit()
 
-                # Удаляем лишние "старые" дубликаты, если вдруг успели появиться
                 db.query(UserSession).filter(
                     UserSession.operator_id == operator.id,
                     UserSession.session_id != existing_session.session_id
@@ -1212,7 +1209,6 @@ async def login(data: LoginRequest):
                     "role": "operator"
                 }
 
-            # Иначе: удаляем старые сессии этого оператора и создаем новую
             db.query(UserSession).filter(UserSession.operator_id == operator.id).delete()
             db.flush()
 
@@ -1226,7 +1222,6 @@ async def login(data: LoginRequest):
             db.commit()
             db.refresh(new_session)
 
-            # Логика статуса окна по настройке
             if operator.window_id:
                 window = db.query(Window).filter(Window.id == operator.window_id).first()
                 if window:
@@ -1250,7 +1245,6 @@ async def login(data: LoginRequest):
                 "role": "operator"
             }
 
-        # 3. Если никто не подошел
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
 
     except Exception as e:
