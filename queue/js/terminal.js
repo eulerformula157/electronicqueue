@@ -247,7 +247,7 @@ async function createTicket(serviceId, serviceName) {
             socket.send(JSON.stringify({ type: "queue_updated" }));
         }
 
-        showNotice(`Ваш номер: ${data.number}. Возьмите талон!`, CONFIG.NOTICE_DURATION);
+        showNotice(`Ваш номер: ${data.number}`, CONFIG.NOTICE_DURATION);
 
     } catch (error) {
         console.error("Ошибка при создании билета:", error);
