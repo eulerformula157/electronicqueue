@@ -25,6 +25,7 @@ body {
     color: var(--text-main);
     min-height: 100vh;
     box-sizing: border-box;
+    cursor: none;
 }
 
 h1 {
