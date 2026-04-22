@@ -809,7 +809,7 @@ def get_my_queue(
                 "number": t.number,
                 "service_id": t.service_id,
                 "service_name": t.service_name or "Неизвестно",
-                "created_at": t.created_at.strftime("%H:%M") if t.created_at else "—",
+                "created_at": (t.created_at + timedelta(hours=8)).strftime("%H:%M") if t.created_at else "—",
                 "priority": t.priority
             })
 
