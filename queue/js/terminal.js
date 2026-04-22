@@ -58,11 +58,11 @@ async function performTerminalLogin(login, password, isAuto = false) {
 async function handleTerminalManualLogin() {
     const login = document.getElementById("term-login").value;
     const pass = document.getElementById("term-password").value;
-    const btn = document.getElementById("term-auth-btn");
+    const btn = document.getElementById("vkb-login-btn") || document.getElementById("term-auth-btn");
     
-    btn.disabled = true;
+    if (btn) btn.disabled = true;
     await performTerminalLogin(login, pass);
-    btn.disabled = false;
+    if (btn) btn.disabled = false;
 }
 
 
@@ -318,6 +318,218 @@ function startAntiSleepAudio() {
 document.addEventListener('click', () => {
     startAntiSleepAudio();
 }, { once: true });
+
+
+let vkbActiveField = 'term-login';
+let vkbShift = false;
+let vkbCaps = false;
+
+const VKB_LAYOUT = [
+    ['1','2','3','4','5','6','7','8','9','0','-','='],
+    ['q','w','e','r','t','y','u','i','o','p','[',']'],
+    ['a','s','d','f','g','h','j','k','l',';','\''],
+    ['z','x','c','v','b','n','m',',','.','/']
+];
+
+const VKB_SHIFT_MAP = {
+    '1':'!','2':'@','3':'#','4':'$','5':'%','6':'^','7':'&','8':'*','9':'(','0':')',
+    '-':'_','=':'+',
+    '[':'{',']':'}',
+    ';':':','\'':'"',
+    ',':'<','.':'>','/':'?'
+};
+
+function setActiveField(fieldId) {
+    vkbActiveField = fieldId;
+    // Подсветить активное поле
+    ['term-login','term-password'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.borderColor = id === fieldId ? '#00aaff' : '#e2e8f0';
+    });
+}
+
+function vkbPress(char) {
+    const el = document.getElementById(vkbActiveField);
+    if (!el) return;
+
+    el.value += char;
+
+    if (vkbShift && !vkbCaps) {
+        vkbShift = false;
+        renderVkbKeys();
+    }
+}
+
+function vkbBackspace() {
+    const el = document.getElementById(vkbActiveField);
+    if (el) el.value = el.value.slice(0, -1);
+}
+
+function vkbToggleShift() {
+    vkbShift = !vkbShift;
+    renderVkbKeys();
+}
+
+function vkbToggleCaps() {
+    vkbCaps = !vkbCaps;
+    renderVkbKeys();
+}
+
+function vkbSpace() {
+    const el = document.getElementById(vkbActiveField);
+    if (el) el.value += ' ';
+}
+
+function vkbTab() {
+    // Переключить между полями
+    vkbActiveField = vkbActiveField === 'term-login' ? 'term-password' : 'term-login';
+    setActiveField(vkbActiveField);
+}
+
+function renderVkbKeys() {
+    const isUpper = vkbShift || vkbCaps;
+
+    // --- РЯД 1 ---
+    const numRow = document.getElementById('vkb-row-num');
+    numRow.innerHTML = '';
+
+    VKB_LAYOUT[0].forEach(k => {
+        const btn = document.createElement('button');
+        btn.className = 'vkb-key';
+
+        let char = k;
+        if (vkbShift && VKB_SHIFT_MAP[k]) {
+            char = VKB_SHIFT_MAP[k];
+        }
+
+        btn.textContent = char;
+        btn.onclick = () => vkbPress(char);
+        numRow.appendChild(btn);
+    });
+
+    const bs = document.createElement('button');
+    bs.className = 'vkb-key action-dark';
+    bs.textContent = '⌫';
+    bs.onclick = vkbBackspace;
+    numRow.appendChild(bs);
+
+    // --- РЯД 2 ---
+    const qRow = document.getElementById('vkb-row-q');
+    qRow.innerHTML = '';
+
+    const tab = document.createElement('button');
+    tab.className = 'vkb-key action-dark';
+    tab.textContent = 'Tab';
+    tab.onclick = vkbTab;
+    qRow.appendChild(tab);
+
+    VKB_LAYOUT[1].forEach(k => {
+        const btn = document.createElement('button');
+        btn.className = 'vkb-key';
+        btn.textContent = isUpper ? k.toUpperCase() : k;
+        btn.onclick = () => vkbPress(btn.textContent);
+        qRow.appendChild(btn);
+    });
+
+    // --- РЯД 3 ---
+    const aRow = document.getElementById('vkb-row-a');
+    aRow.innerHTML = '';
+
+    const caps = document.createElement('button');
+    caps.className = 'vkb-key' + (vkbCaps ? ' shift-active' : '');
+    caps.textContent = 'Caps';
+    caps.onclick = vkbToggleCaps;
+    aRow.appendChild(caps);
+
+    VKB_LAYOUT[2].forEach(k => {
+        const btn = document.createElement('button');
+        btn.className = 'vkb-key';
+        btn.textContent = isUpper ? k.toUpperCase() : k;
+        btn.onclick = () => vkbPress(btn.textContent);
+        aRow.appendChild(btn);
+    });
+
+    // --- РЯД 4 ---
+    const zRow = document.getElementById('vkb-row-z');
+    zRow.innerHTML = '';
+
+    const shift = document.createElement('button');
+    shift.className = 'vkb-key' + (vkbShift ? ' shift-active' : '');
+    shift.textContent = 'Shift';
+    shift.onclick = vkbToggleShift;
+    zRow.appendChild(shift);
+
+    VKB_LAYOUT[3].forEach(k => {
+        const btn = document.createElement('button');
+        btn.className = 'vkb-key';
+
+        let char = k;
+        if (vkbShift && VKB_SHIFT_MAP[k]) {
+            char = VKB_SHIFT_MAP[k];
+        }
+
+        btn.textContent = isUpper ? char.toUpperCase() : char;
+        btn.onclick = () => vkbPress(btn.textContent);
+        zRow.appendChild(btn);
+    });
+
+	// --- РЯД 5: ПРОБЕЛ ---
+	const spaceRow = document.getElementById('vkb-row-space');
+	spaceRow.innerHTML = '';
+
+	const space = document.createElement('button');
+	space.className = 'vkb-key';
+	space.textContent = 'Пробел';
+	space.onclick = vkbSpace;
+
+	spaceRow.appendChild(space);
+
+	// --- РЯД 6: ДЕЙСТВИЯ ---
+	const actionRow = document.getElementById('vkb-row-actions');
+	actionRow.innerHTML = '';
+
+	const clear = document.createElement('button');
+	clear.className = 'vkb-key danger';
+	clear.textContent = 'Очистить';
+	clear.onclick = () => {
+		document.getElementById(vkbActiveField).value = '';
+	};
+
+	const login = document.createElement('button');
+	login.className = 'vkb-key action-green';
+	login.textContent = 'Войти';
+	login.onclick = handleTerminalManualLogin;
+
+	actionRow.append(clear, login);
+}
+
+// Инициализируем клавиатуру при первой загрузке
+document.addEventListener('DOMContentLoaded', () => {
+    renderVkbKeys();
+    setActiveField('term-login');
+
+    // Поддержка физической клавиатуры
+    document.addEventListener('keydown', (e) => {
+        const overlay = document.getElementById('terminal-auth-overlay');
+        if (!overlay || overlay.style.display === 'none') return;
+
+        if (e.key === 'Backspace') {
+            e.preventDefault();
+            vkbBackspace();
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            handleTerminalManualLogin();
+        } else if (e.key === 'Tab') {
+            e.preventDefault();
+            vkbTab();
+        } else if (e.key.length === 1) {
+            e.preventDefault();
+            const el = document.getElementById(vkbActiveField);
+            if (el) el.value += e.key;
+        }
+    });
+});
+
 
 // --- Инициализация ---
 loadTerminalSettings();

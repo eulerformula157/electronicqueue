@@ -155,3 +155,80 @@ button.service-btn.unavailable {
     box-shadow: var(--shadow);
     user-select: none;
 }
+
+#vkb {
+    max-width: 700px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.vkb-row {
+    display: grid;
+    gap: 10px;
+}
+
+
+#vkb-row-num { 
+	grid-template-columns: repeat(13, 1fr); 
+}
+
+#vkb-row-q   {
+	grid-template-columns: 1.3fr repeat(12, 1fr); 
+}
+
+#vkb-row-a   {
+	grid-template-columns: 1.3fr repeat(10, 1fr) 1.5fr; 
+}
+
+#vkb-row-z   { 
+	grid-template-columns: 1.8fr repeat(10, 1fr); 
+}
+
+#vkb-row-space {
+    grid-template-columns: 1fr;
+}
+
+#vkb-row-actions {
+    grid-template-columns: 1fr 1fr;
+}
+
+/* Кнопки */
+
+.vkb-key {
+    height: 60px;
+    border-radius: 12px;
+    border: none;
+    background: #fff;
+    font-weight: 700;
+    font-size: 1.05rem;
+}
+
+/* Нажатие */
+.vkb-key:active {
+    transform: translateY(2px);
+    box-shadow: none;
+    background: #f1f5f9;
+}
+
+/* Цвета */
+.vkb-key.action-dark {
+    background: #003366;
+    color: white;
+}
+
+.vkb-key.action-green {
+    background: #28a745;
+    color: white;
+}
+
+.vkb-key.danger {
+    background: #e11d48;
+    color: white;
+}
+
+.vkb-key.shift-active {
+    background: #00aaff;
+    color: white;
+}
