@@ -149,21 +149,31 @@ def verify_admin_session(session_id: str = Header(None)):
         raise HTTPException(status_code=401, detail="Отсутствует session-id")
     
     db = SessionLocal()
-    # Проверяем сессию именно в таблице админов
+    # Проверяем сессию в таблице админских сессий
     session = db.query(AdminSession).filter(AdminSession.session_id == session_id).first()
     if not session:
         db.close()
         raise HTTPException(status_code=401, detail="Неверная сессия администратора")
     
-    # Refresh "online" activity on any authenticated request.
+    # Обновляем активность
     session.last_seen = datetime.now()
     db.commit()
 
+    # Получаем данные администратора
     admin = db.query(Admin).filter(Admin.id == session.admin_id).first()
     db.close()
     
     if not admin:
         raise HTTPException(status_code=403, detail="Администратор не найден")
+
+    # ДОБАВЛЕННАЯ ПРОВЕРКА:
+    # Если статус пользователя "terminal", запрещаем доступ к админским функциям
+    if admin.status == "terminal":
+        raise HTTPException(
+            status_code=403, 
+            detail="Доступ запрещен: терминалы не могут использовать этот эндпоинт"
+        )
+        
     return admin
 
 # Разрешение для CORS
@@ -809,7 +819,7 @@ def get_my_queue(
                 "number": t.number,
                 "service_id": t.service_id,
                 "service_name": t.service_name or "Неизвестно",
-                "created_at": (t.created_at + timedelta(hours=8)).strftime("%H:%M") if t.created_at else "—",
+                "created_at": t.created_at.strftime("%H:%M") if t.created_at else "—",
                 "priority": t.priority
             })
 
