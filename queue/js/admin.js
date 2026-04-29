@@ -1046,9 +1046,26 @@ async function loadExtraSettings() {
                     <select id="setting-active-ticket-on-logout" class="settings-select settings-select-wide">
                         <option value="return_to_queue" ${settings.active_ticket_on_operator_logout === "return_to_queue" ? "selected" : ""}>Вернуть обратно в очередь</option>
                         <option value="keep_with_operator" ${settings.active_ticket_on_operator_logout === "keep_with_operator" ? "selected" : ""}>Оставить за оператором</option>
-                    </select>
+					</select>
                 </label>
             </section>
+			
+		<section class="settings-section">
+			<h4 class="settings-section-title">Очередь</h4>
+
+			<label class="settings-field-row">
+				<span class="settings-label">Режим очереди:</span>
+				<select id="setting-queue-mode" class="settings-select settings-select-wide">
+					<option value="priority_fifo" ${settings.queue_mode === "priority_fifo" ? "selected" : ""}>
+						Приоритет услуг + FIFO
+					</option>
+					<option value="dynamic_operator_distribution" ${settings.queue_mode === "dynamic_operator_distribution" ? "selected" : ""}>
+						Динамическое распределение по операторам
+					</option>
+				</select>
+			</label>
+		</section>
+
 
             <div class="settings-actions">
                 <button onclick="saveExtraSettings()">Сохранить настройки</button>
@@ -1058,13 +1075,14 @@ async function loadExtraSettings() {
 }
 
 async function saveExtraSettings() {
-    const payload = {
-        print_ticket: document.getElementById("setting-print-ticket").checked,
-        show_print_badge: document.getElementById("setting-show-print-badge").checked,
-        default_operator_status: document.getElementById("setting-default-operator-status").value,
-        active_ticket_on_operator_logout: document.getElementById("setting-active-ticket-on-logout").value,
-        hide_services_without_online_operators: document.getElementById("setting-hide-services-without-online").checked
-    };
+	const payload = {
+		print_ticket: document.getElementById("setting-print-ticket").checked,
+		show_print_badge: document.getElementById("setting-show-print-badge").checked,
+		default_operator_status: document.getElementById("setting-default-operator-status").value,
+		active_ticket_on_operator_logout: document.getElementById("setting-active-ticket-on-logout").value,
+		hide_services_without_online_operators: document.getElementById("setting-hide-services-without-online").checked,
+		queue_mode: document.getElementById("setting-queue-mode").value
+	};
 
     const res = await fetchJSON(`${API}/admin/settings`, {
         method: "PUT",

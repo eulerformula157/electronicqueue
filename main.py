@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Body, Header, Depends, status, Query
 from pydantic import BaseModel
-from sqlalchemy import Column, Integer, String, ForeignKey, TIMESTAMP, text
+from sqlalchemy import Column, Integer, String, ForeignKey, TIMESTAMP, text, func, and_
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy import create_engine
@@ -342,10 +342,11 @@ class SystemSettings(Base):
     __tablename__ = "system_settings"
     id = Column(Integer, primary_key=True, default=1)
     print_ticket = Column(String, default="true")
-    show_print_badge = Column(String, default="true")
+    show_print_badge = Column(String, default="false")
     default_operator_status = Column(String, default="online")
     active_ticket_on_operator_logout = Column(String, default="return_to_queue")
     hide_services_without_online_operators = Column(String, default="true")
+    queue_mode = Column(String, default="priority_fifo")
 
 class SystemSettingsUpdate(BaseModel):
     print_ticket: bool
@@ -353,6 +354,7 @@ class SystemSettingsUpdate(BaseModel):
     default_operator_status: str
     active_ticket_on_operator_logout: str
     hide_services_without_online_operators: bool
+    queue_mode: str
 
 class SystemSettingsResponse(BaseModel):
     print_ticket: bool
@@ -360,6 +362,7 @@ class SystemSettingsResponse(BaseModel):
     default_operator_status: str
     active_ticket_on_operator_logout: str
     hide_services_without_online_operators: bool
+    queue_mode: str
 
 class PublicSettingsResponse(BaseModel):
     print_ticket: bool
@@ -398,6 +401,7 @@ def get_system_settings_dict(db: Session) -> dict:
         "hide_services_without_online_operators": _str_to_bool(
             settings.hide_services_without_online_operators, default=True
         ),
+        "queue_mode": settings.queue_mode or "priority_fifo",
     }
 
 
@@ -424,6 +428,73 @@ def build_media_file_path(filename: str) -> str:
     if os.path.commonpath([media_dir, target_path]) != media_dir:
         raise HTTPException(status_code=400, detail="Некорректный путь файла")
     return target_path
+
+def assign_ticket_to_least_loaded_window(db: Session, ticket: Ticket):
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    candidates = (
+        db.query(
+            Window.id.label("window_id"),
+            func.count(Ticket.id).label("served_count")
+        )
+        .join(Operator, Operator.window_id == Window.id)
+        .join(WindowService, WindowService.window_id == Window.id)
+        .outerjoin(
+            Ticket,
+            and_(
+                Ticket.window_id == Window.id,
+                Ticket.status == "finished",
+                Ticket.finished_at >= today_start
+            )
+        )
+        .filter(
+            Window.status == "online",
+            WindowService.service_id == ticket.service_id
+        )
+        .group_by(Window.id)
+        .order_by(func.count(Ticket.id).asc(), Window.id.asc())
+        .first()
+    )
+
+    ticket.window_id = candidates.window_id if candidates else None
+
+async def reassign_waiting_tickets_from_window(db: Session, window_id: int):
+    settings = get_system_settings_dict(db)
+
+    if settings.get("queue_mode") != "dynamic_operator_distribution":
+        return
+
+    db.flush()
+
+    tickets = db.query(Ticket).filter(
+        Ticket.status == "waiting",
+        Ticket.window_id == window_id
+    ).all()
+
+    for ticket in tickets:
+        ticket.window_id = None
+        db.flush()
+        assign_ticket_to_least_loaded_window(db, ticket)
+
+    await manager.broadcast({
+        "type": "queue_updated"
+    })
+
+    db.commit()
+
+async def assign_unassigned_waiting_tickets(db: Session):
+    settings = get_system_settings_dict(db)
+
+    if settings.get("queue_mode") != "dynamic_operator_distribution":
+        return
+
+    tickets = db.query(Ticket).filter(
+        Ticket.status == "waiting",
+        Ticket.window_id.is_(None)
+    ).order_by(Ticket.created_at.asc()).all()
+
+    for ticket in tickets:
+        assign_ticket_to_least_loaded_window(db, ticket)
 # ------------------ Эндпоинты ------------------
 
 @app.post("/services/", tags=["Services"])
@@ -524,7 +595,6 @@ def get_current_terminal(session_id: str = Header(None)):
 @app.post("/tickets/", tags=["Tickets"])
 async def create_ticket(
     ticket: TicketCreate,
-    # Защита: проверяем, что запрос идет от авторизованного терминала
     _auth = Depends(get_current_terminal) 
 ):
     db = SessionLocal()
@@ -558,8 +628,12 @@ async def create_ticket(
             status="waiting",
             created_at=datetime.now()
         )
-        
+
         db.add(db_ticket)
+
+        if settings.get("queue_mode") == "dynamic_operator_distribution":
+            assign_ticket_to_least_loaded_window(db, db_ticket)
+
         db.commit()
         db.refresh(db_ticket)
 
@@ -636,19 +710,32 @@ async def call_next_ticket(operator: Operator = Depends(verify_session)):
         # Ищем подходящий билет с учетом приоритета окна
         # Сортируем: сначала по приоритету (asc - высокий приоритет вперед), 
         # затем по времени создания (asc - старые билеты вперед)
-        ticket = (
-            db.query(Ticket)
-            .join(WindowService, Ticket.service_id == WindowService.service_id)
-            .filter(
-                WindowService.window_id == operator.window_id,
-                Ticket.status == "waiting"
+        settings = get_system_settings_dict(db)
+
+        if settings.get("queue_mode") == "dynamic_operator_distribution":
+            ticket = (
+                db.query(Ticket)
+                .filter(
+                    Ticket.status == "waiting",
+                    Ticket.window_id == operator.window_id
+                )
+                .order_by(Ticket.created_at.asc())
+                .first()
             )
-            .order_by(
-                WindowService.priority.asc(),  # Сначала услуги с высоким приоритетом
-                Ticket.created_at.asc()         # Затем самые старые в этой категории
+        else:
+            ticket = (
+                db.query(Ticket)
+                .join(WindowService, Ticket.service_id == WindowService.service_id)
+                .filter(
+                    WindowService.window_id == operator.window_id,
+                    Ticket.status == "waiting"
+                )
+                .order_by(
+                    WindowService.priority.asc(),
+                    Ticket.created_at.asc()
+                )
+                .first()
             )
-            .first()
-        )
 
         if not ticket:
             return {"detail": "Нет ожидающих билетов"}
@@ -775,34 +862,58 @@ def get_my_queue(
     operator: Operator = Depends(verify_session)
 ):
     db = SessionLocal()
+    settings = get_system_settings_dict(db)
     try:
         if not operator.window_id:
             return []
 
+
+        if settings.get("queue_mode") == "dynamic_operator_distribution":
+            tickets = (
+                db.query(
+                    Ticket.id,
+                    Ticket.number,
+                    Ticket.service_id,
+                    Ticket.created_at,
+                    Service.name.label("service_name")
+                )
+                .join(Service, Service.id == Ticket.service_id)
+                .filter(
+                    Ticket.window_id == operator.window_id,
+                    Ticket.status == "waiting"
+                )
+                .order_by(Ticket.created_at.asc())
+                .offset(skip)
+                .limit(limit)
+                .all()
+            )
+        else:
+
+
         # Соединяем билеты с настройками приоритетов конкретного окна
-        tickets = (
-            db.query(
-                Ticket.id,
-                Ticket.number,
-                Ticket.service_id,
-                Ticket.created_at,
-                Service.name.label("service_name"),
-                WindowService.priority.label("priority")
+            tickets = (
+                db.query(
+                    Ticket.id,
+                    Ticket.number,
+                    Ticket.service_id,
+                    Ticket.created_at,
+                    Service.name.label("service_name"),
+                    WindowService.priority.label("priority")
+                )
+                .join(WindowService, Ticket.service_id == WindowService.service_id)
+                .join(Service, Service.id == Ticket.service_id)
+                .filter(
+                    WindowService.window_id == operator.window_id,
+                    Ticket.status == "waiting"
+                )
+                .order_by(
+                    WindowService.priority.asc(), # Самые важные услуги сверху
+                    Ticket.created_at.asc()        # Внутри приоритета — по времени записи
+                )
+                .offset(skip)
+                .limit(limit)
+                .all()
             )
-            .join(WindowService, Ticket.service_id == WindowService.service_id)
-            .join(Service, Service.id == Ticket.service_id)
-            .filter(
-                WindowService.window_id == operator.window_id,
-                Ticket.status == "waiting"
-            )
-            .order_by(
-                WindowService.priority.asc(), # Самые важные услуги сверху
-                Ticket.created_at.asc()        # Внутри приоритета — по времени записи
-            )
-            .offset(skip)
-            .limit(limit)
-            .all()
-        )
 
         # Считаем обслуженные за сегодня
         today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -820,7 +931,7 @@ def get_my_queue(
                 "service_id": t.service_id,
                 "service_name": t.service_name or "Неизвестно",
                 "created_at": t.created_at.strftime("%H:%M") if t.created_at else "—",
-                "priority": t.priority
+                "priority": getattr(t, "priority", None)
             })
 
         return {
@@ -834,7 +945,8 @@ def get_my_queue(
 async def redirect_ticket(data: RedirectRequest, operator: Operator = Depends(verify_session)):
     db = SessionLocal()
     try:
-        # 1. Получаем тикет в статусе "called"
+        settings = get_system_settings_dict(db)
+
         ticket = db.query(Ticket).filter(
             Ticket.id == data.ticket_id,
             Ticket.status == "called"
@@ -842,12 +954,10 @@ async def redirect_ticket(data: RedirectRequest, operator: Operator = Depends(ve
         if not ticket:
             return {"detail": "Сначала завершите текущего клиента или тикет не найден"}
 
-        # 2. Получаем новую услугу
         service = db.query(Service).filter(Service.id == data.new_service_id).first()
         if not service:
             return {"detail": "Новая услуга не найдена"}
 
-        # 3. Получаем онлайн-окна для новой услуги
         windows = (
             db.query(Window)
             .join(WindowService, Window.id == WindowService.window_id)
@@ -863,29 +973,22 @@ async def redirect_ticket(data: RedirectRequest, operator: Operator = Depends(ve
         if not windows:
             return {"detail": "Нет доступных окон для этой услуги, Пожалуйста сообщите клиенту"}
 
-        # 4. Round-robin выбор окна
-        #next_window = windows[0]
-        #if service.last_window_id:
-        #    for i, w in enumerate(windows):
-        #        if w.id == service.last_window_id:
-        #            next_window = windows[(i + 1) % len(windows)]
-        #            break
-
-        # 5. Обновляем тикет
         ticket.service_id = service.id
         ticket.status = "waiting"
         ticket.window_id = None
         ticket.created_at = text("CURRENT_TIMESTAMP")
 
-        # 6. Обновляем last_window_id услуги
-        #service.last_window_id = next_window.id
-
-        await manager.broadcast({
-            "type": "queue_updated"
-        })
+        if settings.get("queue_mode") == "dynamic_operator_distribution":
+            assign_ticket_to_least_loaded_window(db, ticket)
 
         db.commit()
         db.refresh(ticket)
+
+        await manager.broadcast({
+            "type": "queue_updated",
+            "service_id": service.id
+        })
+
         asyncio.create_task(broadcast_board())
 
         return {"message": "Билет перенаправлен", "ticket": ticket}
@@ -1145,7 +1248,6 @@ async def delete_window_service(window_id: int, service_id: int, admin: Admin = 
     db.close()
 
     return {"status":"ok"}
-
 @app.post("/login", tags=["Auth"])
 async def login(data: LoginRequest):
     db = SessionLocal()
@@ -1154,13 +1256,13 @@ async def login(data: LoginRequest):
         now = datetime.now()
         timeout_datetime = now - timedelta(seconds=SESSION_TIMEOUT_SECONDS)
 
-        # 1. Сначала ищем в таблице администраторов (включает терминалы)
+        # 1. Админы / терминалы
         admin = db.query(Admin).filter(Admin.login == data.login).first()
-        
+
         if admin and verify_password(data.password, admin.password):
-            user_role = admin.status # admin или terminal
+            user_role = admin.status
             is_expirable = 0 if user_role == "terminal" else 1
-            
+
             existing_session = (
                 db.query(AdminSession)
                 .filter(AdminSession.admin_id == admin.id)
@@ -1171,12 +1273,12 @@ async def login(data: LoginRequest):
             if existing_session and existing_session.last_seen and existing_session.last_seen >= timeout_datetime:
                 existing_session.last_seen = now
                 existing_session.is_expirable = is_expirable
-                db.commit()
 
                 db.query(AdminSession).filter(
                     AdminSession.admin_id == admin.id,
                     AdminSession.session_id != existing_session.session_id
                 ).delete()
+
                 db.commit()
 
                 return {
@@ -1185,28 +1287,33 @@ async def login(data: LoginRequest):
                     "role": user_role
                 }
 
-            # Создание новой сессии (удалили лишний login=admin.login)
             db.query(AdminSession).filter(AdminSession.admin_id == admin.id).delete()
             db.flush()
 
             token = secrets.token_hex(32)
+
             new_session = AdminSession(
-                session_id=token, 
+                session_id=token,
                 admin_id=admin.id,
                 last_seen=now,
                 is_expirable=is_expirable
             )
+
             db.add(new_session)
             db.commit()
 
-            return {"session_id": token, "status": admin.status, "role": user_role}
-            
-        # 2. Ищем в операторах
+            return {
+                "session_id": token,
+                "status": admin.status,
+                "role": user_role
+            }
+
+        # 2. Операторы
         operator = db.query(Operator).filter(Operator.login == data.login).first()
-        
+
         if operator and verify_password(data.password, operator.password):
-            is_expirable = 1 # Операторы всегда протухают
-            
+            is_expirable = 1
+
             existing_session = (
                 db.query(UserSession)
                 .filter(UserSession.operator_id == operator.id)
@@ -1215,67 +1322,67 @@ async def login(data: LoginRequest):
             )
 
             if existing_session and existing_session.last_seen and existing_session.last_seen >= timeout_datetime:
-                existing_session.last_seen = now
-                # Поле is_expirable должно быть в модели UserSession!
-                existing_session.is_expirable = is_expirable 
-                db.commit()
+                token = existing_session.session_id
 
-                # Обновляем статус окна если нужно
-                if operator.window_id:
-                    window = db.query(Window).filter(Window.id == operator.window_id).first()
-                    if window:
-                        window.status = settings["default_operator_status"]
-                        db.flush()
-                        update_services_status_for_window(db, window.id)
-                        db.commit()
-                        await manager.broadcast({"type": "services_updated", "window_id": operator.window_id})
-                    else:
-                        db.commit()
-                else:
-                    db.commit()
+                existing_session.last_seen = now
+                existing_session.is_expirable = is_expirable
 
                 db.query(UserSession).filter(
                     UserSession.operator_id == operator.id,
-                    UserSession.session_id != existing_session.session_id
+                    UserSession.session_id != token
                 ).delete()
-                db.commit()
 
-                return {"session_id": existing_session.session_id, "name": operator.name, "window_id": operator.window_id, "role": "operator"}
+            else:
+                db.query(UserSession).filter(UserSession.operator_id == operator.id).delete()
+                db.flush()
 
-            # Создание новой сессии оператора (убрали несуществующий created_at)
-            db.query(UserSession).filter(UserSession.operator_id == operator.id).delete()
-            db.flush()
+                token = secrets.token_hex(32)
 
-            token = secrets.token_hex(32)
-            new_session = UserSession(
-                session_id=token,
-                operator_id=operator.id,
-                last_seen=now,
-                is_expirable=is_expirable
-            )
-            db.add(new_session)
-            db.commit()
+                new_session = UserSession(
+                    session_id=token,
+                    operator_id=operator.id,
+                    last_seen=now,
+                    is_expirable=is_expirable
+                )
+
+                db.add(new_session)
 
             if operator.window_id:
                 window = db.query(Window).filter(Window.id == operator.window_id).first()
+
                 if window:
                     window.status = settings["default_operator_status"]
                     db.flush()
-                    update_services_status_for_window(db, window.id)
-                    db.commit()
-                    await manager.broadcast({"type": "services_updated", "window_id": operator.window_id})
-                else:
-                    db.commit()
-            else:
-                db.commit()
 
-            return {"session_id": token, "name": operator.name, "window_id": operator.window_id, "role": "operator"}
+                    update_services_status_for_window(db, window.id)
+
+                    if window.status == "online":
+                        await assign_unassigned_waiting_tickets(db)
+
+            db.commit()
+
+            if operator.window_id:
+                await manager.broadcast({
+                    "type": "services_updated",
+                    "window_id": operator.window_id
+                })
+                await manager.broadcast({
+                    "type": "queue_updated"
+                })
+
+            return {
+                "session_id": token,
+                "name": operator.name,
+                "window_id": operator.window_id,
+                "role": "operator"
+            }
 
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
 
     except Exception as e:
         db.rollback()
-        if isinstance(e, HTTPException): raise e
+        if isinstance(e, HTTPException):
+            raise e
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
@@ -1294,27 +1401,38 @@ async def logout(session_id: str = Header(...)):
             
             if operator and operator.window_id:
                 window = db.query(Window).filter(Window.id == operator.window_id).first()
+
                 if window:
                     window.status = "offline"
-                    db.commit()
-                    update_services_status_for_window(db, window.id)
-                    await manager.broadcast({"type": "services_updated"})
+                    db.flush()
+
+                    await reassign_waiting_tickets_from_window(db, window.id)
 
                 if settings["active_ticket_on_operator_logout"] == "return_to_queue":
                     active_ticket = db.query(Ticket).filter(
                         Ticket.window_id == operator.window_id,
                         Ticket.status == "called"
                     ).first()
+
                     if active_ticket:
                         active_ticket.status = "waiting"
                         active_ticket.window_id = None
-                        db.commit()
-                        asyncio.create_task(broadcast_board())
-                        await manager.broadcast({"type": "queue_updated"})
-            
-            # Удаляем сессии оператора
-            db.query(UserSession).filter(UserSession.operator_id == operator_id).delete()
-            db.commit()
+
+                        if settings.get("queue_mode") == "dynamic_operator_distribution":
+                            assign_ticket_to_least_loaded_window(db, active_ticket)
+
+                db.query(UserSession).filter(UserSession.operator_id == operator_id).delete()
+
+                db.commit()
+
+                if operator.window_id:
+                    update_services_status_for_window(db, operator.window_id)
+
+                asyncio.create_task(broadcast_board())
+                await manager.broadcast({"type": "queue_updated"})
+                await manager.broadcast({"type": "services_updated"})
+
+           
             return {"status": "success", "role": "operator"}
 
         # --- ЛОГИКА ДЛЯ АДМИНИСТРАТОРОВ ---
@@ -1389,6 +1507,14 @@ async def update_window_status(
             raise HTTPException(status_code=404, detail="Window not found")
 
         window.status = data.status.lower()
+        db.flush()
+
+        if window.status == "online":
+            await assign_unassigned_waiting_tickets(db)
+
+        if window.status in {"offline", "break"}:
+            await reassign_waiting_tickets_from_window(db, window.id)
+
         db.commit()
 
         # пересчитываем статусы связанных услуг
@@ -1687,6 +1813,8 @@ async def websocket_operator(websocket: WebSocket, operator_id: int):
                 window = db.query(Window).filter(Window.id == operator.window_id).first()
                 if window:
                     window.status = "offline"
+                    db.flush()
+                    await reassign_waiting_tickets_from_window(db, window.id)
                     update_services_status_for_window(db, window.id)
 
                     if settings["active_ticket_on_operator_logout"] == "return_to_queue":
@@ -1891,6 +2019,9 @@ async def get_admin_settings(admin: Admin = Depends(verify_admin_session)):
     try:
         return get_system_settings_dict(db)
     finally:
+        await manager.broadcast({"type": "services_updated"})
+        await manager.broadcast({"type": "settings_updated"})
+        await manager.broadcast({"type": "queue_updated"})
         db.close()
 
 
@@ -1901,8 +2032,12 @@ async def update_admin_settings(
 ):
     if data.default_operator_status not in {"online", "break", "offline"}:
         raise HTTPException(status_code=400, detail="Некорректный default_operator_status")
+
     if data.active_ticket_on_operator_logout not in {"return_to_queue", "keep_with_operator"}:
         raise HTTPException(status_code=400, detail="Некорректный active_ticket_on_operator_logout")
+
+    if data.queue_mode not in {"priority_fifo", "dynamic_operator_distribution"}:
+        raise HTTPException(status_code=400, detail="Некорректный queue_mode")
 
     db = SessionLocal()
     try:
@@ -1914,6 +2049,7 @@ async def update_admin_settings(
         settings.hide_services_without_online_operators = _bool_to_str(
             data.hide_services_without_online_operators
         )
+        settings.queue_mode = data.queue_mode
         db.commit()
 
         if data.hide_services_without_online_operators:
@@ -2123,20 +2259,31 @@ async def cleanup_sessions():
                         continue
 
                     operator = db.query(Operator).filter(Operator.id == session.operator_id).first()
+
                     if operator and operator.window_id:
-                        active_ticket = db.query(Ticket).filter(
-                            Ticket.window_id == operator.window_id,
-                            Ticket.status == "called"
-                        ).first()
-
-                        if active_ticket and settings["active_ticket_on_operator_logout"] == "return_to_queue":
-                            active_ticket.status = "waiting"
-                            active_ticket.window_id = None
-                            need_board_update = True
-
                         window = db.query(Window).filter(Window.id == operator.window_id).first()
+
                         if window:
                             window.status = "offline"
+                            db.flush()
+
+                            if settings["active_ticket_on_operator_logout"] == "return_to_queue":
+                                active_ticket = db.query(Ticket).filter(
+                                    Ticket.window_id == operator.window_id,
+                                    Ticket.status == "called"
+                                ).first()
+
+                                if active_ticket:
+                                    active_ticket.status = "waiting"
+                                    active_ticket.window_id = None
+
+                                    if settings.get("queue_mode") == "dynamic_operator_distribution":
+                                        assign_ticket_to_least_loaded_window(db, active_ticket)
+
+                                    need_board_update = True
+
+                            await reassign_waiting_tickets_from_window(db, window.id)
+
                             update_services_status_for_window(db, window.id)
 
                     db.delete(session)
