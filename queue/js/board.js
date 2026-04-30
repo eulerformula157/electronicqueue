@@ -1,11 +1,15 @@
 const PAGE_SIZE = 10;
 const processedTickets = new Map();
+const processedCallIds = new Set();
 let highlightTickets = new Set(); 
 
 let ws;
 let previousTickets = [];
 let initialized = false;
 let currentlyCallingId = null;
+const pendingDrawTicketIds = new Set();
+let latestTickets = [];
+
 
 let currentPage = 0;
 let pages = [];
@@ -42,72 +46,129 @@ function updateClock() {
 
 /* ================= MESSAGE ================= */
 
+function getTicketId(ticket) {
+    return String(ticket.id || ticket.ticket_id || ticket.ticket_number || ticket.number);
+}
+
+function renderLatestTickets() {
+    const visibleTickets = latestTickets.filter(t => {
+        return !pendingDrawTicketIds.has(getTicketId(t));
+    });
+
+    updateBoard(visibleTickets);
+}
+
 function handleMessage(event) {
     const data = JSON.parse(event.data);
-    const getCleanId = (t) => String(t.id || t.ticket_id || t.ticket_number || t.number);
 
     const isDuplicate = (ticket) => {
-        const ticketId = getCleanId(ticket);
+        const ticketId = getTicketId(ticket);
         const now = Date.now();
+
         if (currentlyCallingId && String(currentlyCallingId) === ticketId) return true;
         if (processedTickets.has(ticketId) && (now - processedTickets.get(ticketId) < 5000)) return true;
+
         return false;
     };
 
-    const addTicket = (ticket) => {
-        const ticketId = getCleanId(ticket);
-        if (!isDuplicate(ticket)) {
-            processedTickets.set(ticketId, Date.now());
+    const speakAndDrawTicket = (ticket) => {
+        const ticketId = getTicketId(ticket);
 
-            // External TTS call from tts.js
-            speakTicket(ticket, (id, isActive) => {
-                if (isActive) {
-                    currentlyCallingId = id;
-                    highlightTickets.add(id);
-                } else {
-                    highlightTickets.delete(id);
+        if (isDuplicate(ticket)) return;
+
+        processedTickets.set(ticketId, Date.now());
+        pendingDrawTicketIds.add(ticketId);
+
+        // Сразу перерисовываем список без этого тикета,
+        // если он уже успел появиться из board_state.
+        renderLatestTickets();
+
+        speakTicket(ticket, (id, isActive) => {
+            const cleanId = String(id);
+
+            if (isActive) {
+                // Вот здесь аудио уже готово и стартует.
+                // Только теперь показываем тикет.
+                pendingDrawTicketIds.delete(cleanId);
+                currentlyCallingId = cleanId;
+                highlightTickets.add(cleanId);
+
+                renderLatestTickets();
+            } else {
+                highlightTickets.delete(cleanId);
+
+                if (String(currentlyCallingId) === cleanId) {
                     currentlyCallingId = null;
                 }
-                renderPage();
-            });
-        }
+
+                renderLatestTickets();
+            }
+        });
     };
 
-    if (data.tickets || Array.isArray(data)) {
-        const tickets = data.tickets || data;
-        if (initialized) {
-            const newTickets = tickets.filter(t => !previousTickets.find(p => p.id === t.id));
-            newTickets.forEach(t => {
-                addTicket({
-                    id: t.id || t.ticket_number,
-                    number: t.number || t.ticket_number,
-                    window_name: t.window_name
-                });
-            });
+    // Новое событие вызова: именно оно запускает озвучку и показ
+    if (data.type === "ticket_called") {
+        if (data.call_id && processedCallIds.has(data.call_id)) {
+            return;
         }
-        previousTickets = tickets;
-        updateBoard(tickets);
-        initialized = true;
-        return; 
+
+        if (data.call_id) {
+            processedCallIds.add(data.call_id);
+        }
+
+        const ticket = data.ticket || {};
+
+        speakAndDrawTicket({
+            id: ticket.id || data.ticket_id || data.id || data.call_id,
+            number: ticket.number || data.ticket_number || data.number,
+            window_name: ticket.window_name || data.window_name
+        });
+
+        return;
     }
 
+    // Состояние табло только сохраняем и рисуем.
+    // Новые вызванные тикеты, которые ждут озвучку, скрываем.
+    if (data.tickets || Array.isArray(data)) {
+        const tickets = data.tickets || data;
+
+        previousTickets = tickets;
+        latestTickets = tickets;
+        initialized = true;
+
+        renderLatestTickets();
+
+        return;
+    }
+
+    // Старый recall оставляем для совместимости
     if (data.type === "recall_ticket" || data.ticket_number) {
         let realId = data.ticket_id || data.id;
+
         if (!realId) {
-            const existing = previousTickets.find(p => 
+            const existing = latestTickets.find(p =>
                 String(p.number || p.ticket_number) === String(data.ticket_number || data.number)
             );
-            if (existing) realId = existing.id;
+
+            if (existing) {
+                realId = existing.id;
+            }
         }
-        addTicket({
+
+        speakAndDrawTicket({
             id: realId || data.ticket_number || data.number,
             number: data.ticket_number || data.number,
             window_name: data.window_name
         });
+
+        return;
     }
 }
 
-setInterval(() => { processedTickets.clear(); }, 5 * 60 * 1000);
+setInterval(() => {
+    processedTickets.clear();
+    processedCallIds.clear();
+}, 5 * 60 * 1000);
 
 /* ================= BOARD ================= */
 
@@ -148,7 +209,7 @@ function renderPage() {
             board.appendChild(card);
         }
 
-        if (highlightTickets.has(t.id)) {
+        if (highlightTickets.has(String(t.id))) {
             card.classList.add("calling");
         } else {
             card.classList.remove("calling");

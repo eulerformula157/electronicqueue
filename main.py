@@ -499,6 +499,285 @@ async def assign_unassigned_waiting_tickets(db: Session):
 
     for ticket in tickets:
         assign_ticket_to_least_loaded_window(db, ticket)
+
+# ------------------ Дополнительные функции ------------------
+
+def get_called_tickets():
+    db = SessionLocal()
+    try:
+        tickets = (
+            db.query(Ticket, Window)
+            .join(Window, Ticket.window_id == Window.id)
+            .filter(Ticket.status == "called")
+            .order_by(Ticket.called_at.asc())  # Сортировка в каком порядке будут показываться билеты
+            .all()
+        )
+
+        result = []
+        for ticket, window in tickets:
+            result.append({
+                "id": ticket.id,
+                "number": ticket.number,
+                "window_name": window.name,
+                "called_at": ticket.called_at.isoformat() if ticket.called_at else None
+            })
+
+        return result
+    finally:
+        db.close()
+        
+async def broadcast_board():
+    tickets_data = get_called_tickets()
+    # Для доски шлем массив напрямую
+    for conn in manager.active_connections:
+        try:
+            await conn.send_json(tickets_data)
+        except:
+            pass
+
+def update_services_status_for_window(db: Session, window_id: int):
+    settings = get_system_settings_dict(db)
+
+    # Если скрытие услуг отключено, услуги остаются доступными на терминале.
+    if not settings["hide_services_without_online_operators"]:
+        service_ids = [
+            row[0]
+            for row in db.query(WindowService.service_id)
+            .filter(WindowService.window_id == window_id)
+            .all()
+        ]
+        if service_ids:
+            db.query(Service).filter(Service.id.in_(service_ids)).update(
+                {Service.status: "active"},
+                synchronize_session=False
+            )
+        db.commit()
+        return
+
+    # Получаем все услуги окна одним запросом.
+    service_ids = [
+        row[0]
+        for row in db.query(WindowService.service_id)
+        .filter(WindowService.window_id == window_id)
+        .all()
+    ]
+    if not service_ids:
+        db.commit()
+        return
+
+    # Находим услуги, у которых есть хотя бы одно online-окно, одним запросом.
+    online_service_ids = {
+        row[0]
+        for row in db.query(WindowService.service_id)
+        .join(Window, WindowService.window_id == Window.id)
+        .filter(
+            WindowService.service_id.in_(service_ids),
+            Window.status == "online"
+        )
+        .distinct()
+        .all()
+    }
+
+    services = db.query(Service).filter(Service.id.in_(service_ids)).all()
+    for service in services:
+        new_status = "active" if service.id in online_service_ids else "inactive"
+        if service.status != new_status:
+            service.status = new_status
+
+    db.commit()
+    
+def get_operator_state(operator_id: int):
+    db = SessionLocal()
+    try:
+        operator = db.query(Operator).filter(Operator.id == operator_id).first()
+        if not operator or not operator.window_id:
+            return {"error": "Оператор не найден или нет окна"}
+
+        window = db.query(Window).filter(Window.id == operator.window_id).first()
+
+        # Очередь (уже с учетом приоритета, как мы делали ранее)
+        tickets = (
+            db.query(Ticket)
+            .join(WindowService, Ticket.service_id == WindowService.service_id)
+            .filter(WindowService.window_id == operator.window_id, Ticket.status == "waiting")
+            .order_by(WindowService.priority.desc(), Ticket.created_at.asc())
+            .all()
+        )
+
+        current_ticket = db.query(Ticket)\
+            .filter(Ticket.window_id == operator.window_id, Ticket.status == "called")\
+            .first()
+
+        # Услуги с приоритетами
+        services_data = (
+            db.query(Service.name, WindowService.priority)
+            .join(WindowService, Service.id == WindowService.service_id)
+            .filter(WindowService.window_id == operator.window_id)
+            .order_by(WindowService.priority.desc())
+            .all()
+        )
+
+        return {
+            "operator": {"id": operator.id, "name": operator.name},
+            "window": {"id": window.id, "name": window.name, "status": window.status if window else "offline"},
+            "services": [{"name": s[0], "priority": s[1]} for s in services_data],
+            "queue": [{"id": t.id, "number": t.number} for t in tickets],
+            "current_ticket": {"id": current_ticket.id, "number": current_ticket.number} if current_ticket else None
+        }
+    finally:
+        db.close()
+
+async def cleanup_sessions():
+    print("[System] Фоновая задача очистки сессий запущена")
+    while True:
+        await asyncio.sleep(SESSION_TIMEOUT_SECONDS)
+        db: Session = SessionLocal()
+        try:
+            settings = get_system_settings_dict(db)
+            timeout_datetime = datetime.now() - timedelta(seconds=SESSION_TIMEOUT_SECONDS)
+            mapped_session_ids = list(manager.session_id_to_ws.keys())
+            ws_alive_operator_ids = set()
+            ws_alive_admin_ids = set()
+            
+            if mapped_session_ids:
+                ws_user_rows = (
+                    db.query(UserSession.operator_id)
+                    .filter(UserSession.session_id.in_(mapped_session_ids))
+                    .all()
+                )
+                ws_admin_rows = (
+                    db.query(AdminSession.admin_id)
+                    .filter(AdminSession.session_id.in_(mapped_session_ids))
+                    .all()
+                )
+                ws_alive_operator_ids = {row[0] for row in ws_user_rows if row and row[0] is not None}
+                ws_alive_admin_ids = {row[0] for row in ws_admin_rows if row and row[0] is not None}
+
+            # --- ЧАСТЬ 1: ОПЕРАТОРЫ ---
+            # Добавляем фильтр .filter(UserSession.is_expirable == 1)
+            # Сессии с is_expirable=0 (терминалы) база просто не вернет в этом списке
+            dead_sessions = db.query(UserSession).filter(
+                UserSession.last_seen < timeout_datetime,
+                UserSession.is_expirable == 1  # <--- Игнорируем вечные сессии
+            ).all()
+            
+            if dead_sessions:
+                print(f"\n[Cleanup] Найдено мертвых сессий операторов: {len(dead_sessions)}")
+                need_board_update = False
+
+                for session in dead_sessions:
+                    if session.operator_id in ws_alive_operator_ids:
+                        session.last_seen = datetime.now()
+                        continue
+
+                    other_alive = db.query(UserSession).filter(
+                        UserSession.operator_id == session.operator_id,
+                        UserSession.last_seen >= timeout_datetime,
+                        UserSession.session_id != session.session_id
+                    ).first()
+
+                    if other_alive:
+                        db.delete(session)
+                        continue
+
+                    operator = db.query(Operator).filter(Operator.id == session.operator_id).first()
+
+                    if operator and operator.window_id:
+                        window = db.query(Window).filter(Window.id == operator.window_id).first()
+
+                        if window:
+                            window.status = "offline"
+                            db.flush()
+
+                            if settings["active_ticket_on_operator_logout"] == "return_to_queue":
+                                active_ticket = db.query(Ticket).filter(
+                                    Ticket.window_id == operator.window_id,
+                                    Ticket.status == "called"
+                                ).first()
+
+                                if active_ticket:
+                                    active_ticket.status = "waiting"
+                                    active_ticket.window_id = None
+
+                                    if settings.get("queue_mode") == "dynamic_operator_distribution":
+                                        assign_ticket_to_least_loaded_window(db, active_ticket)
+
+                                    need_board_update = True
+
+                            await reassign_waiting_tickets_from_window(db, window.id)
+
+                            update_services_status_for_window(db, window.id)
+
+                    db.delete(session)
+
+            # --- ЧАСТЬ 2: АДМИНИСТРАТОРЫ / ТЕРМИНАЛЫ ---
+            # Аналогично добавляем фильтр AdminSession.is_expirable == 1
+            dead_admin_sessions = db.query(AdminSession).filter(
+                AdminSession.last_seen < timeout_datetime,
+                AdminSession.is_expirable == 1  # <--- Игнорируем терминалы
+            ).all()
+            
+            if dead_admin_sessions:
+                print(f"[Cleanup] Найдено мертвых сессий админов: {len(dead_admin_sessions)}")
+                for a_session in dead_admin_sessions:
+                    if a_session.admin_id in ws_alive_admin_ids:
+                        a_session.last_seen = datetime.now()
+                        continue
+
+                    db.delete(a_session)
+
+            db.commit()
+
+            if dead_sessions:
+                await manager.broadcast({"type": "services_updated"})
+                if need_board_update:
+                    await broadcast_board()
+                    await manager.broadcast({"type": "queue_updated"})
+
+        except Exception as e:
+            print(f"[Cleanup] ОШИБКА: {e}")
+            db.rollback()
+        finally:
+            db.close()
+            
+def get_password_hash(password: str) -> str:
+    # Переводим строку в байты и хэшируем
+    pwd_bytes = password.encode("utf-8")
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(pwd_bytes, salt)
+    return hashed.decode("utf-8")  # возвращаем строку для сохранения в БД
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    # Проверяем совпадение чистого пароля и хэша из БД
+    return bcrypt.checkpw(
+        plain_password.encode("utf-8"), hashed_password.encode("utf-8")
+    )
+            
+def build_ticket_tts_text(ticket_number: int, window_name: str) -> str:
+    return f"Талон {ticket_number}. Подойдите к окну {window_name}."
+
+
+async def broadcast_ticket_called(ticket: Ticket, window: Window):
+    tts_text = build_ticket_tts_text(ticket.number, window.name)
+
+    called_at_value = ticket.called_at
+    if called_at_value:
+        call_id = f"{ticket.id}:{called_at_value}"
+    else:
+        call_id = f"{ticket.id}:{datetime.now().timestamp()}"
+
+    await manager.broadcast({
+        "type": "ticket_called",
+        "call_id": call_id,
+        "ticket": {
+            "id": ticket.id,
+            "number": ticket.number,
+            "window_name": window.name
+        },
+        "tts_text": tts_text
+    })
+
 # ------------------ Эндпоинты ------------------
 
 @app.post("/services/", tags=["Services"])
@@ -689,9 +968,12 @@ async def finish_ticket(operator: Operator = Depends(verify_session)):
     # Завершаем тикет
     ticket.status = "finished"
     ticket.finished_at = text("CURRENT_TIMESTAMP")
+
     db.commit()
     db.refresh(ticket)
-    asyncio.create_task(broadcast_board())
+
+    await broadcast_board()
+
     db.close()
     return ticket
 
@@ -748,15 +1030,19 @@ async def call_next_ticket(operator: Operator = Depends(verify_session)):
         ticket.window_id = operator.window_id
         ticket.called_at = text("CURRENT_TIMESTAMP")
 
-        await manager.broadcast({
-            "type": "queue_updated"
-        })    
-
-
-        asyncio.create_task(broadcast_board())
-
         db.commit()
         db.refresh(ticket)
+
+        window = db.query(Window).filter(Window.id == ticket.window_id).first()
+
+        await manager.broadcast({
+            "type": "queue_updated"
+        })
+
+        await broadcast_board()
+
+        if window:
+            await broadcast_ticket_called(ticket, window)
         
         # ДОБАВЬТЕ ЭТО: возвращаем объект с именем услуги
         return {
@@ -809,9 +1095,14 @@ async def call_specific_ticket(data: CallSpecificRequest, operator: Operator = D
 
         db.commit()
         db.refresh(ticket)
-        
-        # Обновляем табло
-        asyncio.create_task(broadcast_board())
+
+        window = db.query(Window).filter(Window.id == ticket.window_id).first()
+
+        # Обновляем табло только после сохранения в БД
+        await broadcast_board()
+
+        if window:
+            await broadcast_ticket_called(ticket, window)
 
         return {
             "id": ticket.id,
@@ -844,17 +1135,17 @@ async def cancel_current_ticket(operator: Operator = Depends(verify_session)):
     ticket.status = "cancelled"
     ticket.finished_at = text("CURRENT_TIMESTAMP")
 
-    # Уведомляем систему об изменениях в очереди
-    await manager.broadcast({
-        "type": "queue_updated"
-    })    
-
     db.commit()
     db.refresh(ticket)
-    
-    # Обновляем табло (чтобы номер исчез из списка вызванных)
-    asyncio.create_task(broadcast_board())
-    
+
+    # Уведомляем систему об изменениях только после сохранения в БД
+    await manager.broadcast({
+        "type": "queue_updated"
+    })
+
+    # Обновляем табло, чтобы номер исчез из списка вызванных
+    await broadcast_board()
+
     db.close()
 
     return {"status": "cancelled", "ticket_number": ticket.number}
@@ -2121,15 +2412,54 @@ def normalize_tts_input(value: str) -> str:
     return value
 
 
-@app.get("/tts/create", tags=["TTS"])
-def create_tts_file(text: str = Query(..., min_length=1, max_length=200)):
-    text = normalize_tts_input(text)
+#@app.get("/tts/create", tags=["TTS"])
+#def create_tts_file(text: str = Query(..., min_length=1, max_length=200)):
+#    text = normalize_tts_input(text)
+#
+#    os.makedirs(TTS_CACHE_DIR, exist_ok=True)
+#
+#    output_path = os.path.join(TTS_CACHE_DIR, "last_tts.wav")
+#
+#    result = subprocess.run(
+#        [
+#            PIPER_PATH,
+#            "--model", PIPER_MODEL,
+#            "--output_file", output_path,
+#            "--length-scale", TTS_LENGTH_SCALE,
+#            "--noise-scale", TTS_NOISE_SCALE,
+#            "--noise-w-scale", TTS_NOISE_W_SCALE,
+#        ],
+#        input=text,
+#        text=True,
+#        stdout=subprocess.PIPE,
+#        stderr=subprocess.PIPE,
+#        check=False,
+#    )
+#
+#    if result.returncode != 0:
+#        raise HTTPException(status_code=500, detail=f"Piper error: {result.stderr}")
+#
+#    if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+#        raise HTTPException(status_code=500, detail="TTS файл не создан или пустой")
+#
+#    return {
+#        "status": "saved",
+#        "file_path": os.path.abspath(output_path),
+#        "file_size": os.path.getsize(output_path)
+#    }
+    
+    
+tts_locks: dict[str, asyncio.Lock] = {}
 
-    os.makedirs(TTS_CACHE_DIR, exist_ok=True)
 
-    output_path = os.path.join(TTS_CACHE_DIR, "last_tts.wav")
+def get_tts_lock(file_hash: str) -> asyncio.Lock:
+    if file_hash not in tts_locks:
+        tts_locks[file_hash] = asyncio.Lock()
+    return tts_locks[file_hash]
 
-    result = subprocess.run(
+
+def run_piper_sync(text: str, output_path: str):
+    return subprocess.run(
         [
             PIPER_PATH,
             "--model", PIPER_MODEL,
@@ -2145,271 +2475,53 @@ def create_tts_file(text: str = Query(..., min_length=1, max_length=200)):
         check=False,
     )
 
-    if result.returncode != 0:
-        raise HTTPException(status_code=500, detail=f"Piper error: {result.stderr}")
 
-    if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-        raise HTTPException(status_code=500, detail="TTS файл не создан или пустой")
+@app.get("/tts/audio", tags=["TTS"])
+async def get_tts_audio(text: str = Query(..., min_length=1, max_length=200)):
+    text = normalize_tts_input(text)
 
-    return {
-        "status": "saved",
-        "file_path": os.path.abspath(output_path),
-        "file_size": os.path.getsize(output_path)
-    }
-# ------------------ Дополнительные функции ------------------
+    os.makedirs(TTS_CACHE_DIR, exist_ok=True)
 
-def get_called_tickets():
-    db = SessionLocal()
-    try:
-        tickets = (
-            db.query(Ticket, Window)
-            .join(Window, Ticket.window_id == Window.id)
-            .filter(Ticket.status == "called")
-            .order_by(Ticket.called_at.asc())  # Сортировка в каком порядке будут показываться билеты
-            .all()
+    file_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
+    output_path = os.path.join(TTS_CACHE_DIR, f"{file_hash}.wav")
+
+    # Если файл уже есть — сразу отдаём
+    if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+        return FileResponse(
+            output_path,
+            media_type="audio/wav",
+            filename="tts.wav"
         )
 
-        result = []
-        for ticket, window in tickets:
-            result.append({
-                "id": ticket.id,
-                "number": ticket.number,
-                "window_name": window.name,
-                "called_at": ticket.called_at.isoformat() if ticket.called_at else None
-            })
-
-        return result
-    finally:
-        db.close()
-        
-async def broadcast_board():
-    tickets_data = get_called_tickets()
-    # Для доски шлем массив напрямую
-    for conn in manager.active_connections:
-        try:
-            await conn.send_json(tickets_data)
-        except:
-            pass
-
-def update_services_status_for_window(db: Session, window_id: int):
-    settings = get_system_settings_dict(db)
-
-    # Если скрытие услуг отключено, услуги остаются доступными на терминале.
-    if not settings["hide_services_without_online_operators"]:
-        service_ids = [
-            row[0]
-            for row in db.query(WindowService.service_id)
-            .filter(WindowService.window_id == window_id)
-            .all()
-        ]
-        if service_ids:
-            db.query(Service).filter(Service.id.in_(service_ids)).update(
-                {Service.status: "active"},
-                synchronize_session=False
+    async with get_tts_lock(file_hash):
+        # Повторная проверка после ожидания lock
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            return FileResponse(
+                output_path,
+                media_type="audio/wav",
+                filename="tts.wav"
             )
-        db.commit()
-        return
 
-    # Получаем все услуги окна одним запросом.
-    service_ids = [
-        row[0]
-        for row in db.query(WindowService.service_id)
-        .filter(WindowService.window_id == window_id)
-        .all()
-    ]
-    if not service_ids:
-        db.commit()
-        return
+        result = await asyncio.to_thread(run_piper_sync, text, output_path)
 
-    # Находим услуги, у которых есть хотя бы одно online-окно, одним запросом.
-    online_service_ids = {
-        row[0]
-        for row in db.query(WindowService.service_id)
-        .join(Window, WindowService.window_id == Window.id)
-        .filter(
-            WindowService.service_id.in_(service_ids),
-            Window.status == "online"
-        )
-        .distinct()
-        .all()
-    }
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Piper error: {result.stderr}"
+            )
 
-    services = db.query(Service).filter(Service.id.in_(service_ids)).all()
-    for service in services:
-        new_status = "active" if service.id in online_service_ids else "inactive"
-        if service.status != new_status:
-            service.status = new_status
+        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            raise HTTPException(
+                status_code=500,
+                detail="TTS файл не создан или пустой"
+            )
 
-    db.commit()
-    
-def get_operator_state(operator_id: int):
-    db = SessionLocal()
-    try:
-        operator = db.query(Operator).filter(Operator.id == operator_id).first()
-        if not operator or not operator.window_id:
-            return {"error": "Оператор не найден или нет окна"}
-
-        window = db.query(Window).filter(Window.id == operator.window_id).first()
-
-        # Очередь (уже с учетом приоритета, как мы делали ранее)
-        tickets = (
-            db.query(Ticket)
-            .join(WindowService, Ticket.service_id == WindowService.service_id)
-            .filter(WindowService.window_id == operator.window_id, Ticket.status == "waiting")
-            .order_by(WindowService.priority.desc(), Ticket.created_at.asc())
-            .all()
-        )
-
-        current_ticket = db.query(Ticket)\
-            .filter(Ticket.window_id == operator.window_id, Ticket.status == "called")\
-            .first()
-
-        # Услуги с приоритетами
-        services_data = (
-            db.query(Service.name, WindowService.priority)
-            .join(WindowService, Service.id == WindowService.service_id)
-            .filter(WindowService.window_id == operator.window_id)
-            .order_by(WindowService.priority.desc())
-            .all()
-        )
-
-        return {
-            "operator": {"id": operator.id, "name": operator.name},
-            "window": {"id": window.id, "name": window.name, "status": window.status if window else "offline"},
-            "services": [{"name": s[0], "priority": s[1]} for s in services_data],
-            "queue": [{"id": t.id, "number": t.number} for t in tickets],
-            "current_ticket": {"id": current_ticket.id, "number": current_ticket.number} if current_ticket else None
-        }
-    finally:
-        db.close()
-
-async def cleanup_sessions():
-    print("[System] Фоновая задача очистки сессий запущена")
-    while True:
-        await asyncio.sleep(SESSION_TIMEOUT_SECONDS)
-        db: Session = SessionLocal()
-        try:
-            settings = get_system_settings_dict(db)
-            timeout_datetime = datetime.now() - timedelta(seconds=SESSION_TIMEOUT_SECONDS)
-            mapped_session_ids = list(manager.session_id_to_ws.keys())
-            ws_alive_operator_ids = set()
-            ws_alive_admin_ids = set()
-            
-            if mapped_session_ids:
-                ws_user_rows = (
-                    db.query(UserSession.operator_id)
-                    .filter(UserSession.session_id.in_(mapped_session_ids))
-                    .all()
-                )
-                ws_admin_rows = (
-                    db.query(AdminSession.admin_id)
-                    .filter(AdminSession.session_id.in_(mapped_session_ids))
-                    .all()
-                )
-                ws_alive_operator_ids = {row[0] for row in ws_user_rows if row and row[0] is not None}
-                ws_alive_admin_ids = {row[0] for row in ws_admin_rows if row and row[0] is not None}
-
-            # --- ЧАСТЬ 1: ОПЕРАТОРЫ ---
-            # Добавляем фильтр .filter(UserSession.is_expirable == 1)
-            # Сессии с is_expirable=0 (терминалы) база просто не вернет в этом списке
-            dead_sessions = db.query(UserSession).filter(
-                UserSession.last_seen < timeout_datetime,
-                UserSession.is_expirable == 1  # <--- Игнорируем вечные сессии
-            ).all()
-            
-            if dead_sessions:
-                print(f"\n[Cleanup] Найдено мертвых сессий операторов: {len(dead_sessions)}")
-                need_board_update = False
-
-                for session in dead_sessions:
-                    if session.operator_id in ws_alive_operator_ids:
-                        session.last_seen = datetime.now()
-                        continue
-
-                    other_alive = db.query(UserSession).filter(
-                        UserSession.operator_id == session.operator_id,
-                        UserSession.last_seen >= timeout_datetime,
-                        UserSession.session_id != session.session_id
-                    ).first()
-
-                    if other_alive:
-                        db.delete(session)
-                        continue
-
-                    operator = db.query(Operator).filter(Operator.id == session.operator_id).first()
-
-                    if operator and operator.window_id:
-                        window = db.query(Window).filter(Window.id == operator.window_id).first()
-
-                        if window:
-                            window.status = "offline"
-                            db.flush()
-
-                            if settings["active_ticket_on_operator_logout"] == "return_to_queue":
-                                active_ticket = db.query(Ticket).filter(
-                                    Ticket.window_id == operator.window_id,
-                                    Ticket.status == "called"
-                                ).first()
-
-                                if active_ticket:
-                                    active_ticket.status = "waiting"
-                                    active_ticket.window_id = None
-
-                                    if settings.get("queue_mode") == "dynamic_operator_distribution":
-                                        assign_ticket_to_least_loaded_window(db, active_ticket)
-
-                                    need_board_update = True
-
-                            await reassign_waiting_tickets_from_window(db, window.id)
-
-                            update_services_status_for_window(db, window.id)
-
-                    db.delete(session)
-
-            # --- ЧАСТЬ 2: АДМИНИСТРАТОРЫ / ТЕРМИНАЛЫ ---
-            # Аналогично добавляем фильтр AdminSession.is_expirable == 1
-            dead_admin_sessions = db.query(AdminSession).filter(
-                AdminSession.last_seen < timeout_datetime,
-                AdminSession.is_expirable == 1  # <--- Игнорируем терминалы
-            ).all()
-            
-            if dead_admin_sessions:
-                print(f"[Cleanup] Найдено мертвых сессий админов: {len(dead_admin_sessions)}")
-                for a_session in dead_admin_sessions:
-                    if a_session.admin_id in ws_alive_admin_ids:
-                        a_session.last_seen = datetime.now()
-                        continue
-
-                    db.delete(a_session)
-
-            db.commit()
-
-            if dead_sessions:
-                await manager.broadcast({"type": "services_updated"})
-                if need_board_update:
-                    await broadcast_board()
-                    await manager.broadcast({"type": "queue_updated"})
-
-        except Exception as e:
-            print(f"[Cleanup] ОШИБКА: {e}")
-            db.rollback()
-        finally:
-            db.close()
-            
-def get_password_hash(password: str) -> str:
-    # Переводим строку в байты и хэшируем
-    pwd_bytes = password.encode("utf-8")
-    salt = bcrypt.gensalt()
-    hashed = bcrypt.hashpw(pwd_bytes, salt)
-    return hashed.decode("utf-8")  # возвращаем строку для сохранения в БД
-
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    # Проверяем совпадение чистого пароля и хэша из БД
-    return bcrypt.checkpw(
-        plain_password.encode("utf-8"), hashed_password.encode("utf-8")
+    return FileResponse(
+        output_path,
+        media_type="audio/wav",
+        filename="tts.wav"
     )
-            
+
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(cleanup_sessions())

@@ -1,21 +1,31 @@
 /* ================= tts.js ================= */
+
 const TTS_CONFIG = {
     repeatCount: 1,
-    rate: 0.85,
-    pitch: 1.0,
-    lang: 'ru-RU'
+
+    // Новый серверный TTS endpoint.
+    // Если фронт и API на одном домене/порту — оставь относительный путь.
+    endpoint: "/tts/audio",
+
+    // Пауза между разными вызовами талонов
+    pauseBetweenTicketsMs: 1000,
+
+    // Запасной таймаут, если событие audio.onended не сработает
+    safetyTimeoutMs: 15000
 };
 
 let ttsQueue = [];
 let isAudioPlaying = false;
 let isSpeakingNow = false;
+let currentAudio = null;
 
 /**
- * @param {Object} ticket - The ticket object {id, number, window_name}
- * @param {Function} onStateChange - Callback to update UI (highlighting)
+ * @param {Object} ticket - { id, number, window_name }
+ * @param {Function} onStateChange - callback для подсветки карточки
  */
 async function speakTicket(ticket, onStateChange) {
     ttsQueue.push({ ticket, onStateChange });
+
     if (!isAudioPlaying) {
         processTTSQueue();
     }
@@ -28,8 +38,9 @@ async function processTTSQueue() {
     }
 
     isAudioPlaying = true;
+
     const { ticket, onStateChange } = ttsQueue.shift();
-    const text = `Талон ${ticket.number}. Подойдите к ${ticket.window_name}.`;
+    const text = buildTicketText(ticket);
 
     try {
         for (let i = 0; i < TTS_CONFIG.repeatCount; i++) {
@@ -38,48 +49,118 @@ async function processTTSQueue() {
     } catch (e) {
         console.error("TTS Error:", e);
     } finally {
-        // Pause between different tickets
-        setTimeout(processTTSQueue, 1000);
+        setTimeout(processTTSQueue, TTS_CONFIG.pauseBetweenTicketsMs);
     }
+}
+
+function buildTicketText(ticket) {
+    const number = ticket?.number ?? "";
+    const windowName = ticket?.window_name ?? "";
+
+    return `Талон ${number}. Подойдите к окну ${windowName}.`;
 }
 
 function speakOnce(text, ticketId, onStateChange) {
     return new Promise((resolve) => {
-        const utterance = new SpeechSynthesisUtterance(text);
-        const voices = window.speechSynthesis.getVoices();
-        
-        utterance.voice = voices.find(v => v.lang === TTS_CONFIG.lang && v.name.includes('Google')) ||
-                          voices.find(v => v.lang === TTS_CONFIG.lang) ||
-                          voices[0];
-
-        utterance.lang = TTS_CONFIG.lang;
-        utterance.rate = TTS_CONFIG.rate;
-        utterance.pitch = TTS_CONFIG.pitch;
-
         let finished = false;
+        let objectUrl = null;
+        let safetyTimer = null;
+
         const done = () => {
             if (finished) return;
+
             finished = true;
             isSpeakingNow = false;
-            onStateChange(ticketId, false); // Turn off highlighting
+
+            if (safetyTimer) {
+                clearTimeout(safetyTimer);
+            }
+
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio.src = "";
+                currentAudio.load();
+                currentAudio = null;
+            }
+
+            if (objectUrl) {
+                URL.revokeObjectURL(objectUrl);
+            }
+
+            if (typeof onStateChange === "function") {
+                onStateChange(ticketId, false);
+            }
+
             resolve();
         };
 
-        utterance.onstart = () => {
+        const startHighlight = () => {
             isSpeakingNow = true;
-            onStateChange(ticketId, true); // Turn on highlighting
+
+            if (typeof onStateChange === "function") {
+                onStateChange(ticketId, true);
+            }
         };
 
-        utterance.onend = done;
-        utterance.onerror = done;
+        fetchTtsAudio(text)
+            .then((audioBlob) => {
+                objectUrl = URL.createObjectURL(audioBlob);
 
-        // Safety timeout
-        setTimeout(done, Math.max(2000, text.length * 100));
-        window.speechSynthesis.speak(utterance);
+                const audio = new Audio(objectUrl);
+                currentAudio = audio;
+
+                audio.preload = "auto";
+
+                audio.onplay = startHighlight;
+                audio.onended = done;
+                audio.onerror = (e) => {
+                    console.error("Audio playback error:", e);
+                    done();
+                };
+
+                safetyTimer = setTimeout(done, TTS_CONFIG.safetyTimeoutMs);
+
+                return audio.play();
+            })
+            .catch((e) => {
+                console.error("TTS fetch/play error:", e);
+                done();
+            });
     });
 }
 
-// Ensure voices are loaded
-speechSynthesis.onvoiceschanged = () => {
-    console.log("TTS Voices initialized");
-};
+async function fetchTtsAudio(text) {
+    const url = `${TTS_CONFIG.endpoint}?text=${encodeURIComponent(text)}`;
+
+    const response = await fetch(url, {
+        method: "GET",
+        cache: "no-store"
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        throw new Error(`TTS request failed: ${response.status} ${errorText}`);
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+
+    if (!contentType.includes("audio")) {
+        console.warn("TTS response is not audio:", contentType);
+    }
+
+    return response.blob();
+}
+
+function stopTTS() {
+    ttsQueue = [];
+
+    if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.src = "";
+        currentAudio.load();
+        currentAudio = null;
+    }
+
+    isAudioPlaying = false;
+    isSpeakingNow = false;
+}
