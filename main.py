@@ -23,6 +23,10 @@ import bcrypt
 import shutil
 from fastapi import UploadFile, File
 from pathlib import Path as FilePath
+import subprocess
+import hashlib
+import re
+from fastapi.responses import FileResponse
 
 # Загружаем переменные из файла main.env
 load_dotenv("main.env")
@@ -2078,6 +2082,80 @@ async def get_public_settings():
         }
     finally:
         db.close()
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+PIPER_PATH = os.getenv("PIPER_PATH", "piper")
+
+PIPER_MODEL = os.getenv(
+    "PIPER_MODEL",
+    os.path.join(BASE_DIR, "queue", "tts", "ru_RU-irina-medium.onnx")
+)
+
+if not os.path.isabs(PIPER_MODEL):
+    PIPER_MODEL = os.path.join(BASE_DIR, PIPER_MODEL)
+
+TTS_CACHE_DIR = os.getenv(
+    "TTS_CACHE_DIR",
+    os.path.join(BASE_DIR, "queue", "tts", "cache")
+)
+
+if not os.path.isabs(TTS_CACHE_DIR):
+    TTS_CACHE_DIR = os.path.join(BASE_DIR, TTS_CACHE_DIR)
+
+TTS_LENGTH_SCALE = os.getenv("TTS_LENGTH_SCALE", "1.25")
+TTS_NOISE_SCALE = os.getenv("TTS_NOISE_SCALE", "0.65")
+TTS_NOISE_W_SCALE = os.getenv("TTS_NOISE_W_SCALE", "0.75")
+
+
+def normalize_tts_input(value: str) -> str:
+    value = (value or "").strip()
+    value = re.sub(r"\s+", " ", value)
+
+    if not value:
+        raise HTTPException(status_code=400, detail="Пустой текст для озвучки")
+
+    if len(value) > 200:
+        raise HTTPException(status_code=400, detail="Слишком длинный текст для озвучки")
+
+    return value
+
+
+@app.get("/tts/create", tags=["TTS"])
+def create_tts_file(text: str = Query(..., min_length=1, max_length=200)):
+    text = normalize_tts_input(text)
+
+    os.makedirs(TTS_CACHE_DIR, exist_ok=True)
+
+    output_path = os.path.join(TTS_CACHE_DIR, "last_tts.wav")
+
+    result = subprocess.run(
+        [
+            PIPER_PATH,
+            "--model", PIPER_MODEL,
+            "--output_file", output_path,
+            "--length-scale", TTS_LENGTH_SCALE,
+            "--noise-scale", TTS_NOISE_SCALE,
+            "--noise-w-scale", TTS_NOISE_W_SCALE,
+        ],
+        input=text,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    if result.returncode != 0:
+        raise HTTPException(status_code=500, detail=f"Piper error: {result.stderr}")
+
+    if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+        raise HTTPException(status_code=500, detail="TTS файл не создан или пустой")
+
+    return {
+        "status": "saved",
+        "file_path": os.path.abspath(output_path),
+        "file_size": os.path.getsize(output_path)
+    }
 # ------------------ Дополнительные функции ------------------
 
 def get_called_tickets():

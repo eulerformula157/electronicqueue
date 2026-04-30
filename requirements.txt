@@ -6,3 +6,4 @@ passlib[bcrypt]
 bcrypt
 psycopg2-binary
 python-multipart
+piper-tts
