@@ -1,4 +1,4 @@
-const PAGE_SIZE = 10;
+const PAGE_SIZE = window.BOARD_CONFIG?.pageSize || 10;
 const processedTickets = new Map();
 const processedCallIds = new Set();
 let highlightTickets = new Set(); 
@@ -83,27 +83,29 @@ function handleMessage(event) {
         // если он уже успел появиться из board_state.
         renderLatestTickets();
 
-        speakTicket(ticket, (id, isActive) => {
-            const cleanId = String(id);
+		speakTicket(ticket, (id, isActive) => {
+			const cleanId = String(id);
 
-            if (isActive) {
-                // Вот здесь аудио уже готово и стартует.
-                // Только теперь показываем тикет.
-                pendingDrawTicketIds.delete(cleanId);
-                currentlyCallingId = cleanId;
-                highlightTickets.add(cleanId);
+			if (isActive) {
+				window.dispatchEvent(new CustomEvent("ticket-speech-start"));
 
-                renderLatestTickets();
-            } else {
-                highlightTickets.delete(cleanId);
+				pendingDrawTicketIds.delete(cleanId);
+				currentlyCallingId = cleanId;
+				highlightTickets.add(cleanId);
 
-                if (String(currentlyCallingId) === cleanId) {
-                    currentlyCallingId = null;
-                }
+				renderLatestTickets();
+			} else {
+				window.dispatchEvent(new CustomEvent("ticket-speech-end"));
 
-                renderLatestTickets();
-            }
-        });
+				highlightTickets.delete(cleanId);
+
+				if (String(currentlyCallingId) === cleanId) {
+					currentlyCallingId = null;
+				}
+
+				renderLatestTickets();
+			}
+		});
     };
 
     // Новое событие вызова: именно оно запускает озвучку и показ
@@ -118,11 +120,13 @@ function handleMessage(event) {
 
         const ticket = data.ticket || {};
 
-        speakAndDrawTicket({
-            id: ticket.id || data.ticket_id || data.id || data.call_id,
-            number: ticket.number || data.ticket_number || data.number,
-            window_name: ticket.window_name || data.window_name
-        });
+		speakAndDrawTicket({
+			id: ticket.id || data.ticket_id || data.id || data.call_id,
+			number: ticket.number || data.ticket_number || data.number,
+			window_name: ticket.window_name || data.window_name,
+			display_text: ticket.display_text || data.display_text,
+			tts_text: data.tts_text || ticket.tts_text
+		});
 
         return;
     }
@@ -155,11 +159,13 @@ function handleMessage(event) {
             }
         }
 
-        speakAndDrawTicket({
-            id: realId || data.ticket_number || data.number,
-            number: data.ticket_number || data.number,
-            window_name: data.window_name
-        });
+		speakAndDrawTicket({
+			id: realId || data.ticket_number || data.number,
+			number: data.ticket_number || data.number,
+			window_name: data.window_name,
+			display_text: data.display_text,
+			tts_text: data.tts_text
+		});
 
         return;
     }
@@ -188,6 +194,71 @@ function updateBoard(tickets){
     }
 }
 
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+}
+
+function splitDisplayText(ticket) {
+    const number = String(ticket.number ?? ticket.ticket_number ?? "");
+    const windowName = String(ticket.window_name ?? "");
+
+    const fallback = {
+        left: `ТАЛОН ${number}`,
+        middle: "→",
+        right: `ОКНО ${windowName}`
+    };
+
+    const text = String(ticket.display_text || "").trim();
+
+    if (!text || !number || !windowName) {
+        return fallback;
+    }
+
+    const numberIndex = text.indexOf(number);
+    if (numberIndex === -1) {
+        return fallback;
+    }
+
+    const afterNumberIndex = numberIndex + number.length;
+    const windowIndex = text.indexOf(windowName, afterNumberIndex);
+
+    if (windowIndex === -1) {
+        return fallback;
+    }
+
+    const left = text.slice(0, afterNumberIndex).trim();
+    let between = text.slice(afterNumberIndex, windowIndex).trim();
+    const afterWindow = text.slice(windowIndex + windowName.length).trim();
+
+    let middle = "→";
+    let rightPrefix = between;
+
+	const separators = ["->", "=>", "→", "—", "-", "/", "|"];
+
+	for (const separator of separators) {
+		const separatorIndex = between.indexOf(separator);
+
+		if (separatorIndex !== -1) {
+			middle = "→";
+			rightPrefix = between.slice(separatorIndex + separator.length).trim();
+			break;
+		}
+	}
+
+    const right = `${rightPrefix} ${windowName} ${afterWindow}`.trim();
+
+    return {
+        left,
+        middle,
+        right: right || fallback.right
+    };
+}
+
 function renderPage() {
     const board = document.getElementById("board");
 
@@ -201,28 +272,30 @@ function renderPage() {
     }
 
     const currentTickets = pages[currentPage] || [];
-    currentTickets.forEach((t, i) => {
-        let card = board.children[i];
-        if (!card) {
-            card = document.createElement("div");
-            card.className = "card";
-            board.appendChild(card);
-        }
+	currentTickets.forEach((t, i) => {
+		let card = board.children[i];
+		if (!card) {
+			card = document.createElement("div");
+			card.className = "card";
+			board.appendChild(card);
+		}
 
-        if (highlightTickets.has(String(t.id))) {
-            card.classList.add("calling");
-        } else {
-            card.classList.remove("calling");
-        }
+		if (highlightTickets.has(String(t.id))) {
+			card.classList.add("calling");
+		} else {
+			card.classList.remove("calling");
+		}
 
-        card.innerHTML = `
-            <div class="line">
-                <span class="ticket">ТАЛОН ${t.number}</span>
-                <span class="arrow">→</span>
-                <span class="window">ОКНО ${t.window_name}</span>
-            </div>
-        `;
-    });
+		const parts = splitDisplayText(t);
+
+		card.innerHTML = `
+			<div class="line">
+				<span class="ticket">${escapeHtml(parts.left)}</span>
+				<span class="arrow">${escapeHtml(parts.middle)}</span>
+				<span class="window">${escapeHtml(parts.right)}</span>
+			</div>
+		`;
+	});
 
     while (board.children.length > currentTickets.length) {
         board.removeChild(board.lastChild);

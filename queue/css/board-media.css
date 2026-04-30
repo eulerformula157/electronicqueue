@@ -20,41 +20,39 @@ h1 {
     margin-bottom: 10px;
     font-weight: 500;
 }
-
 .board-wrapper {
-    display: flex;
-    flex-direction: row;   
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) clamp(320px, 24vw, 430px);
     gap: 20px;
     height: calc(100vh - 170px);
     padding: 20px;
-}
-
-.board {
-    width: 400px;                        
-    display: grid;
-    grid-template-columns: 1fr;        
-    grid-template-rows: repeat(10, 1fr);
-    gap: 10px;
+    box-sizing: border-box;
+    align-items: start;
 }
 
 .media-panel {
-    flex: 1;            
-    border-radius: 12px;
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
-    background: #000;
-    transition: opacity 0.8s ease;
-    position: relative; 
-}
-
-.media-panel.hidden {
-    opacity: 0;
-    pointer-events: none;
+    background: transparent;
+    border-radius: 0;
+    box-shadow: none;
+    position: relative;
 }
 
 .media-panel video {
     width: 100%;
     height: 100%;
-	object-fit: contain;
+    object-fit: contain;
+    display: block;
+    background: transparent;
+}
+.board {
+    width: auto;
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: repeat(7, minmax(85px, 1fr));
+    gap: 10px;
 }
 
 .card {
@@ -127,4 +125,31 @@ h1 {
     animation: call-flash 1.5s ease-in-out;
     border: 3px solid #2d89ef;
     z-index: 10;
+}
+
+.line {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 56px 1fr;
+    align-items: center;
+    column-gap: 18px;
+}
+
+.ticket {
+    justify-self: end;
+    text-align: center;
+    white-space: normal;
+}
+
+.arrow {
+    justify-self: center;
+    text-align: center;
+    white-space: nowrap;
+    line-height: 1;
+}
+
+.window {
+    justify-self: start;
+    text-align: center;
+    white-space: normal;
 }

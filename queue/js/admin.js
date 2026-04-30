@@ -1067,6 +1067,37 @@ async function loadExtraSettings() {
 		</section>
 
 
+        <section class="settings-section">
+            <h4 class="settings-section-title">Табло и озвучка</h4>
+
+            <label class="settings-field-row">
+                <span class="settings-label">Сообщение вызова / озвучки:</span>
+                <input
+                    id="setting-call-message-template"
+                    class="settings-input settings-input-wide"
+                    value="${settings.call_message_template || "Талон <number> подойдите к окну <window>"}"
+                >
+            </label>
+
+            <small class="settings-hint">
+                Можно менять любой текст, но оставьте <b>&lt;number&gt;</b> и <b>&lt;window&gt;</b>.
+                Например: <b>Талон &lt;number&gt;, подойдите к окну &lt;window&gt;</b>
+            </small>
+
+            <label class="settings-field-row">
+                <span class="settings-label">Отображение вызванного талона на табло:</span>
+                <input
+                    id="setting-board-ticket-template"
+                    class="settings-input settings-input-wide"
+                    value="${settings.board_ticket_template || "Билет <number> -> окно <window>"}"
+                >
+            </label>
+
+            <small class="settings-hint">
+                Например: <b>&lt;number&gt; → &lt;window&gt;</b> или <b>Билет &lt;number&gt; / окно &lt;window&gt;</b>
+            </small>
+        </section>
+
             <div class="settings-actions">
                 <button onclick="saveExtraSettings()">Сохранить настройки</button>
             </div>
@@ -1081,8 +1112,21 @@ async function saveExtraSettings() {
 		default_operator_status: document.getElementById("setting-default-operator-status").value,
 		active_ticket_on_operator_logout: document.getElementById("setting-active-ticket-on-logout").value,
 		hide_services_without_online_operators: document.getElementById("setting-hide-services-without-online").checked,
-		queue_mode: document.getElementById("setting-queue-mode").value
+		queue_mode: document.getElementById("setting-queue-mode").value,
+
+		call_message_template: document.getElementById("setting-call-message-template").value.trim(),
+		board_ticket_template: document.getElementById("setting-board-ticket-template").value.trim()
 	};
+
+    if (!payload.call_message_template.includes("<number>") || !payload.call_message_template.includes("<window>")) {
+        alert("Шаблон озвучки должен содержать <number> и <window>");
+        return;
+    }
+
+    if (!payload.board_ticket_template.includes("<number>") || !payload.board_ticket_template.includes("<window>")) {
+        alert("Шаблон табло должен содержать <number> и <window>");
+        return;
+    }
 
     const res = await fetchJSON(`${API}/admin/settings`, {
         method: "PUT",

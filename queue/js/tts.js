@@ -54,6 +54,10 @@ async function processTTSQueue() {
 }
 
 function buildTicketText(ticket) {
+    if (ticket?.tts_text) {
+        return ticket.tts_text;
+    }
+
     const number = ticket?.number ?? "";
     const windowName = ticket?.window_name ?? "";
 

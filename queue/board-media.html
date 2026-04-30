@@ -20,10 +20,18 @@
 
 <div class="status-indicator" id="ws-status">WS: connecting...</div>
 
-<script src="/queue/js/media.js"></script>
 <script src="/queue/js/config.js"></script>
 <script src="/queue/js/tts.js"></script>
-<script src="/queue/js/board-media.js"></script>
+<script src="/queue/js/media.js"></script>
+
+<script>
+    window.BOARD_CONFIG = {
+        pageSize: 7,
+        mediaMode: true
+    };
+</script>
+
+<script src="/queue/js/board.js"></script>
 
 </body>
 </html>

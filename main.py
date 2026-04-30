@@ -352,6 +352,15 @@ class SystemSettings(Base):
     hide_services_without_online_operators = Column(String, default="true")
     queue_mode = Column(String, default="priority_fifo")
 
+    call_message_template = Column(
+        String,
+        default="Талон <number> подойдите к окну <window>"
+    )
+    board_ticket_template = Column(
+        String,
+        default="Билет <number> -> окно <window>"
+    )
+
 class SystemSettingsUpdate(BaseModel):
     print_ticket: bool
     show_print_badge: bool
@@ -359,6 +368,9 @@ class SystemSettingsUpdate(BaseModel):
     active_ticket_on_operator_logout: str
     hide_services_without_online_operators: bool
     queue_mode: str
+    call_message_template: str
+    board_ticket_template: str
+
 
 class SystemSettingsResponse(BaseModel):
     print_ticket: bool
@@ -367,6 +379,8 @@ class SystemSettingsResponse(BaseModel):
     active_ticket_on_operator_logout: str
     hide_services_without_online_operators: bool
     queue_mode: str
+    call_message_template: str
+    board_ticket_template: str
 
 class PublicSettingsResponse(BaseModel):
     print_ticket: bool
@@ -406,6 +420,8 @@ def get_system_settings_dict(db: Session) -> dict:
             settings.hide_services_without_online_operators, default=True
         ),
         "queue_mode": settings.queue_mode or "priority_fifo",
+        "call_message_template": settings.call_message_template or "Талон <number> подойдите к окну <window>",
+        "board_ticket_template": settings.board_ticket_template or "Билет <number> -> окно <window>",
     }
 
 
@@ -505,11 +521,13 @@ async def assign_unassigned_waiting_tickets(db: Session):
 def get_called_tickets():
     db = SessionLocal()
     try:
+        settings = get_system_settings_dict(db)
+
         tickets = (
             db.query(Ticket, Window)
             .join(Window, Ticket.window_id == Window.id)
             .filter(Ticket.status == "called")
-            .order_by(Ticket.called_at.asc())  # Сортировка в каком порядке будут показываться билеты
+            .order_by(Ticket.called_at.asc())
             .all()
         )
 
@@ -519,6 +537,11 @@ def get_called_tickets():
                 "id": ticket.id,
                 "number": ticket.number,
                 "window_name": window.name,
+                "display_text": render_ticket_template(
+                    settings["board_ticket_template"],
+                    ticket.number,
+                    window.name
+                ),
                 "called_at": ticket.called_at.isoformat() if ticket.called_at else None
             })
 
@@ -754,12 +777,45 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         plain_password.encode("utf-8"), hashed_password.encode("utf-8")
     )
             
+def render_ticket_template(template: str, ticket_number: int, window_name: str) -> str:
+    template = template or ""
+    return (
+        template
+        .replace("<number>", str(ticket_number))
+        .replace("<window>", str(window_name))
+    )
+    
 def build_ticket_tts_text(ticket_number: int, window_name: str) -> str:
-    return f"Талон {ticket_number}. Подойдите к окну {window_name}."
+    db = SessionLocal()
+    try:
+        settings = get_system_settings_dict(db)
+        return render_ticket_template(
+            settings["call_message_template"],
+            ticket_number,
+            window_name
+        )
+    finally:
+        db.close()    
 
 
 async def broadcast_ticket_called(ticket: Ticket, window: Window):
-    tts_text = build_ticket_tts_text(ticket.number, window.name)
+    db = SessionLocal()
+    try:
+        settings = get_system_settings_dict(db)
+
+        tts_text = render_ticket_template(
+            settings["call_message_template"],
+            ticket.number,
+            window.name
+        )
+
+        display_text = render_ticket_template(
+            settings["board_ticket_template"],
+            ticket.number,
+            window.name
+        )
+    finally:
+        db.close()
 
     called_at_value = ticket.called_at
     if called_at_value:
@@ -773,7 +829,9 @@ async def broadcast_ticket_called(ticket: Ticket, window: Window):
         "ticket": {
             "id": ticket.id,
             "number": ticket.number,
-            "window_name": window.name
+            "window_name": window.name,
+            "display_text": display_text,
+            "tts_text": tts_text
         },
         "tts_text": tts_text
     })
@@ -1302,7 +1360,6 @@ async def redirect_ticket(data: RedirectRequest, operator: Operator = Depends(ve
 async def recall_ticket(operator: Operator = Depends(verify_session)):
     db = SessionLocal()
     try:
-        # Ищем текущий активный тикет в этом окне
         ticket = db.query(Ticket).filter(
             Ticket.window_id == operator.window_id,
             Ticket.status == "called"
@@ -1311,14 +1368,33 @@ async def recall_ticket(operator: Operator = Depends(verify_session)):
         if not ticket:
             raise HTTPException(status_code=404, detail="Нет активного клиента для повторного вызова")
 
-        # Отправляем широковещательное сообщение через существующий broadcast_board
-        # или напрямую через manager, чтобы табло среагировало
+        window = db.query(Window).filter(Window.id == operator.window_id).first()
+        if not window:
+            raise HTTPException(status_code=404, detail="Окно не найдено")
+
+        settings = get_system_settings_dict(db)
+
+        tts_text = render_ticket_template(
+            settings["call_message_template"],
+            ticket.number,
+            window.name
+        )
+
+        display_text = render_ticket_template(
+            settings["board_ticket_template"],
+            ticket.number,
+            window.name
+        )
+
         await manager.broadcast({
             "type": "recall_ticket",
+            "ticket_id": ticket.id,
             "ticket_number": ticket.number,
-            "window_name": db.query(Window).filter(Window.id == operator.window_id).first().name
+            "window_name": window.name,
+            "display_text": display_text,
+            "tts_text": tts_text
         })
-        
+
         return {"status": "success", "message": f"Повторный вызов клиента {ticket.number}"}
     finally:
         db.close()
@@ -2333,6 +2409,18 @@ async def update_admin_settings(
 
     if data.queue_mode not in {"priority_fifo", "dynamic_operator_distribution"}:
         raise HTTPException(status_code=400, detail="Некорректный queue_mode")
+        
+    if "<number>" not in data.call_message_template or "<window>" not in data.call_message_template:
+        raise HTTPException(
+            status_code=400,
+            detail="Шаблон сообщения должен содержать <number> и <window>"
+        )
+
+    if "<number>" not in data.board_ticket_template or "<window>" not in data.board_ticket_template:
+        raise HTTPException(
+            status_code=400,
+            detail="Шаблон табло должен содержать <number> и <window>"
+        )        
 
     db = SessionLocal()
     try:
@@ -2345,6 +2433,8 @@ async def update_admin_settings(
             data.hide_services_without_online_operators
         )
         settings.queue_mode = data.queue_mode
+        settings.call_message_template = data.call_message_template
+        settings.board_ticket_template = data.board_ticket_template        
         db.commit()
 
         if data.hide_services_without_online_operators:
@@ -2357,6 +2447,8 @@ async def update_admin_settings(
 
         await manager.broadcast({"type": "services_updated"})
         await manager.broadcast({"type": "settings_updated"})
+        await broadcast_board()
+        await manager.broadcast({"type": "queue_updated"})        
         return get_system_settings_dict(db)
     finally:
         db.close()
