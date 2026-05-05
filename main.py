@@ -358,7 +358,7 @@ class SystemSettings(Base):
     )
     board_ticket_template = Column(
         String,
-        default="Билет <number> -> окно <window>"
+        default="Билет <number> -> Окно <window>"
     )
 
 class SystemSettingsUpdate(BaseModel):
@@ -1025,7 +1025,7 @@ async def finish_ticket(operator: Operator = Depends(verify_session)):
 
     # Завершаем тикет
     ticket.status = "finished"
-    ticket.finished_at = text("CURRENT_TIMESTAMP")
+    ticket.finished_at = datetime.now() #text("CURRENT_TIMESTAMP")
 
     db.commit()
     db.refresh(ticket)
@@ -1086,7 +1086,7 @@ async def call_next_ticket(operator: Operator = Depends(verify_session)):
 
         ticket.status = "called"
         ticket.window_id = operator.window_id
-        ticket.called_at = text("CURRENT_TIMESTAMP")
+        ticket.called_at = datetime.now() #text("CURRENT_TIMESTAMP")
 
         db.commit()
         db.refresh(ticket)
@@ -1329,7 +1329,7 @@ async def redirect_ticket(data: RedirectRequest, operator: Operator = Depends(ve
         ticket.service_id = service.id
         ticket.status = "waiting"
         ticket.window_id = None
-        ticket.created_at = text("CURRENT_TIMESTAMP")
+        ticket.created_at = datetime.now() #text("CURRENT_TIMESTAMP")
 
         if settings.get("queue_mode") == "dynamic_operator_distribution":
             assign_ticket_to_least_loaded_window(db, ticket)
