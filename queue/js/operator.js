@@ -140,7 +140,7 @@ const servicesHtml = data.services && data.services.length > 0
                 <span style="font-size: 1.4rem; font-weight: 400; color: var(--text-muted); line-height: 1.8;">${data.operator_name}</span>
             </div>
             <div style="margin-bottom: 25px;">
-                <span style="color: var(--text-main); font-size: 1.1rem; text-transform: uppercase; font-weight: 800; letter-spacing: 0.5px;">Окно</span><br>
+                <span style="color: var(--text-main); font-size: 1.1rem; text-transform: uppercase; font-weight: 800; letter-spacing: 0.5px;">Рабочее место</span><br>
                 <span style="font-size: 1.6rem; font-weight: 400; color: var(--text-muted); line-height: 1.8;">${data.window_name}</span>
             </div>
             <div>
@@ -277,7 +277,7 @@ async function finishCurrent() {
         if (res.ok) {
             currentTicketId = null; 
             
-            document.getElementById("current").textContent = "Окно свободно";
+            document.getElementById("current").textContent = "Рабочее место свободно";
             // Также скрываем уведомление, если оно висело
             document.getElementById("toast-notification").style.display = "none";
         } else {
@@ -287,7 +287,7 @@ async function finishCurrent() {
             // Если билета на сервере уже нет, синхронизируем локальное состояние
             if (res.status === 404 || res.status === 400) {
                 currentTicketId = null;
-                document.getElementById("current").textContent = "Окно свободно";
+                document.getElementById("current").textContent = "Рабочее место свободно";
             }
         }
 
@@ -367,7 +367,7 @@ async function confirmRedirect() {
         alert(result.detail);
     } else {
         alert("Билет перенаправлен");
-        document.getElementById("current").textContent = "Окно свободно";
+        document.getElementById("current").textContent = "Рабочее место свободно";
         currentTicketId = null;
         document.getElementById("redirect-panel").style.display = "none";
         loadQueue();
@@ -401,7 +401,7 @@ async function changeWindowStatus(newStatus) {
 
         // Проверяем, привязано ли вообще окно
         if (!details.window_id) {
-            alert("За вами не закреплено активное окно");
+            alert("За вами не закреплено активное рабочее место");
             return;
         }
 
@@ -495,7 +495,7 @@ async function loadCurrentTicket() {
 
         } else {
             currentTicketId = null;
-            document.getElementById("current").textContent = "Окно свободно";
+            document.getElementById("current").textContent = "Рабочее место свободно";
             document.getElementById("current-service").textContent = "";
         }
 
@@ -644,7 +644,7 @@ async function cancelCurrent() {
 
             const currentElement = document.getElementById("current");
             if (currentElement) {
-                currentElement.textContent = "Окно свободно";
+                currentElement.textContent = "Рабочее место свободно";
 				document.getElementById("current-service").textContent = "";
             }
             
@@ -659,7 +659,7 @@ async function cancelCurrent() {
             
             if (res.status === 404 || data.detail === "Нет активного билета для отмены") {
                 currentTicketId = null;
-                document.getElementById("current").textContent = "Окно свободно";
+                document.getElementById("current").textContent = "Рабочее место свободно";
 				document.getElementById("current-service").textContent = "";
             }
         }
@@ -702,7 +702,7 @@ function runAutoCallLogic() {
         if (!currentElement || !startBtn) return;
 
         const currentText = currentElement.textContent;
-        const isFree = currentText.includes("Окно свободно") || currentText === "--";
+        const isFree = currentText.includes("Рабочее место свободно") || currentText === "--";
         const isOnline = startBtn.classList.contains("status-active");
         
         if (isOnline && isFree) {

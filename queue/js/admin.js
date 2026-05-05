@@ -83,7 +83,11 @@ function initAdminWebSocket() {
 let windows=[]
 let operators=[]
 let services=[]
-let openedServicesRow=null
+let openedServices=null
+
+function resetOpened() {
+    openedServices = null;
+}
 
 async function fetchJSON(url, options = {}) {
     const sessionId = sessionStorage.getItem("session_id");
@@ -124,6 +128,7 @@ document.getElementById("form").innerHTML=html
 
 
 async function loadServices() {
+	resetOpened();
 	// Показываем форму и таблицу обратно
     document.getElementById("form").style.display = "block";
     document.getElementById("table").style.display = "table";
@@ -186,15 +191,15 @@ async function loadServices() {
 
 function editServiceStatus(id, currentStatus) {
   // если уже открыто для этой услуги — закрываем
-  if(openedServicesRow && openedServicesRow.dataset.type === "serviceStatus" && openedServicesRow.dataset.serviceId == id){
-    openedServicesRow.remove();
-    openedServicesRow = null;
+  if(openedServices && openedServices.dataset.type === "serviceStatus" && openedServices.dataset.serviceId == id){
+    openedServices.remove();
+    openedServices = null;
     return;
   }
 
   // закрываем любое другое открытое окно
-  openedServicesRow?.remove();
-  openedServicesRow = null;
+  openedServices?.remove();
+  openedServices = null;
 
   let row = document.getElementById(`service-${id}`);
 
@@ -214,7 +219,7 @@ function editServiceStatus(id, currentStatus) {
   </tr>`;
 
   row.insertAdjacentHTML("afterend", html);
-  openedServicesRow = row.nextElementSibling;
+  openedServices = row.nextElementSibling;
 }
 
 // функция сохранения статуса через эндпоинт
@@ -243,6 +248,7 @@ async function saveServiceStatus(id) {
   if (res.ok) {
     // Если на бэкенде сработал broadcast, 
     // другие клиенты обновятся автоматически через WebSocket
+	resetOpened();
     loadServices(); 
   } else {
     const err = await res.json();
@@ -258,15 +264,15 @@ async function saveServiceStatus(id) {
 
 function editService(id, name) {
   // если уже открыто для этой услуги — закрываем
-  if(openedServicesRow && openedServicesRow.dataset.type === "service" && openedServicesRow.dataset.serviceId == id){
-    openedServicesRow.remove();
-    openedServicesRow = null;
+  if(openedServices && openedServices.dataset.type === "service" && openedServices.dataset.serviceId == id){
+    openedServices.remove();
+    openedServices = null;
     return;
   }
 
   // закрываем любое другое открытое окно
-  openedServicesRow?.remove();
-  openedServicesRow = null;
+  openedServices?.remove();
+  openedServices = null;
 
   let row = document.getElementById(`service-${id}`);
 
@@ -283,7 +289,7 @@ function editService(id, name) {
   </tr>`;
 
   row.insertAdjacentHTML("afterend", html);
-  openedServicesRow = row.nextElementSibling;
+  openedServices = row.nextElementSibling;
 }
 
 async function saveService(id) {
@@ -305,6 +311,7 @@ async function saveService(id) {
     if (res.ok) {
         // После успешного сохранения просто перезагружаем список
         loadServices();
+		resetOpened();
     } else {
         const err = await res.json();
         alert("Ошибка при обновлении: " + (err.detail || "Не удалось сохранить"));
@@ -361,6 +368,7 @@ async function addService() {
 ////////////////////////////////////////
 
 async function loadWindows() {
+	resetOpened();
 	// Показываем форму и таблицу обратно
     document.getElementById("form").style.display = "block";
     document.getElementById("table").style.display = "table";
@@ -399,22 +407,22 @@ async function loadWindows() {
     setForm(`
     <div class="form">
         <input id="newWindowName" placeholder="Название окна">
-        <button onclick="addWindow()">Добавить окно</button>
+        <button onclick="addWindow()">Добавить рабочее место</button>
     </div>
     `);
 }
 
 function editWindowStatus(id, currentStatus) {
   // если уже открыто для этого окна — закрываем
-  if (openedServicesRow && openedServicesRow.dataset.type === "status" && openedServicesRow.dataset.windowId == id) {
-    openedServicesRow.remove();
-    openedServicesRow = null;
+  if (openedServices && openedServices.dataset.type === "status" && openedServices.dataset.windowId == id) {
+    openedServices.remove();
+    openedServices = null;
     return;
   }
 
   // закрываем любое другое открытое окно/строку статуса
-  openedServicesRow?.remove();
-  openedServicesRow = null;
+  openedServices?.remove();
+  openedServices = null;
 
   let row = document.getElementById(`window-${id}`);
   let html = `
@@ -433,7 +441,7 @@ function editWindowStatus(id, currentStatus) {
   </tr>
   `;
   row.insertAdjacentHTML("afterend", html);
-  openedServicesRow = row.nextElementSibling;
+  openedServices = row.nextElementSibling;
 }
 
 async function saveWindowStatus(id) {
@@ -448,23 +456,23 @@ async function saveWindowStatus(id) {
 
   if(!res) return; // fetchJSON сам покажет ошибку, если сессия истекла
 
-  openedServicesRow.remove();
-  openedServicesRow = null;
+  openedServices.remove();
+  resetOpened();
   loadWindows();
 }
 
 // Редактирование названия окна на строку ниже
 function editWindow(id, name) {
 	  // если уже открыто для этого окна — закрываем
-	  if(openedServicesRow && openedServicesRow.dataset.type === "window" && openedServicesRow.dataset.windowId == id){
-		openedServicesRow.remove();
-		openedServicesRow = null;
+	  if(openedServices && openedServices.dataset.type === "window" && openedServices.dataset.windowId == id){
+		openedServices.remove();
+		openedServices = null;
 		return;
 	  }
 
 	  // закрываем любое другое открытое окно
-	  openedServicesRow?.remove();
-	  openedServicesRow = null;
+	  openedServices?.remove();
+	  openedServices = null;
 	  
     let row = document.getElementById(`window-${id}`);
 
@@ -480,7 +488,7 @@ function editWindow(id, name) {
 	</tr>
 	`;
     row.insertAdjacentHTML("afterend", html);
-    openedServicesRow = row.nextElementSibling;
+    openedServices = row.nextElementSibling;
 }
 
 async function saveWindow(id) {
@@ -500,8 +508,10 @@ async function saveWindow(id) {
     // Если res не определен (undefined), значит fetchJSON перенаправил на логин или выдал ошибку
     if (res) {
         // Опционально: можно добавить уведомление об успехе
-        console.log(`Окно ${id} успешно обновлено`);
-        loadWindows();
+        console.log(`Рабочее место ${id} успешно обновлено`);
+        resetOpened();
+		loadWindows();
+		
     }
 }
 // Добавление окна
@@ -521,7 +531,7 @@ async function addWindow() {
     // Если запрос успешен (res не undefined)
     if (res) {
         input.value = ""; // Очищаем поле ввода
-        alert("Окно успешно добавлено");
+        alert("Рабочее место успешно добавлено");
         loadWindows();    // Обновляем список окон
     }
 }
@@ -535,12 +545,12 @@ async function deleteWindow(id) {
 
         // 2. Если массив не пустой, значит услуги есть — прерываем удаление
         if (Array.isArray(linkedServices) && linkedServices.length > 0) {
-            alert("Нельзя удалить окно: сначала удалите все услуги, привязанные к этому окну в меню 'Услуги'!");
+            alert("Нельзя удалить рабочее место: сначала удалите все услуги, привязанные к этому рабочему месту в меню 'Услуги'!");
             return;
         }
 
         // 3. Если услуг нет, запрашиваем подтверждение
-        if (!confirm("Вы уверены, что хотите удалить это окно?")) return;
+        if (!confirm("Вы уверены, что хотите удалить это рабочее место?")) return;
 
         // 4. Отправляем запрос на удаление
         const res = await fetchJSON(`${API}/windows/${id}`, {
@@ -548,7 +558,7 @@ async function deleteWindow(id) {
         });
 
         if (res) {
-            alert("Окно успешно удалено");
+            alert("Рабочее успешно удалено");
             loadWindows(); // Обновляем таблицу
         }
     } catch (e) {
@@ -568,6 +578,7 @@ return w?w.name:"-"
 ////////////////////////////////////////
 
 async function loadOperators(){
+	resetOpened();
 	// Показываем форму и таблицу обратно
     document.getElementById("form").style.display = "block";
     document.getElementById("table").style.display = "table";
@@ -584,7 +595,7 @@ async function loadOperators(){
 
     operators.sort((a,b) => a.id - b.id);
 
-    let html = `<tr><th>ID</th><th>Имя</th><th>Окно</th><th>Действия</th></tr>`;
+    let html = `<tr><th>ID</th><th>Имя</th><th>Рабочее место</th><th>Действия</th></tr>`;
 
     for(let op of operators){
         html += `
@@ -594,7 +605,7 @@ async function loadOperators(){
           <td id="window-${op.id}">${getWindowName(op.window_id)}</td>
           <td>
             <button onclick="editOperatorName(${op.id},'${op.name}')">Имя</button>
-            <button onclick="editOperatorWindow(${op.id},${op.window_id})">Окно</button>
+            <button onclick="editOperatorWindow(${op.id},${op.window_id})">Рабочее место</button>
             <button onclick="editLoginPassword(${op.id})">Данные</button>
             <button style="background: #ffcccc;" onclick="deleteOperator(${op.id})">Удалить</button>
           </td>
@@ -618,15 +629,15 @@ async function loadOperators(){
 
 function editOperatorName(id,name){
   // если уже открыто для этого оператора — закрываем
-  if(openedServicesRow && openedServicesRow.dataset.type === "name" && openedServicesRow.dataset.operatorId == id){
-    openedServicesRow.remove();
-    openedServicesRow = null;
+  if(openedServices && openedServices.dataset.type === "name" && openedServices.dataset.operatorId == id){
+    openedServices.remove();
+    openedServices = null;
     return;
   }
 
   // закрываем любое другое открытое окно
-  openedServicesRow?.remove();
-  openedServicesRow = null;
+  openedServices?.remove();
+  openedServices = null;
 
   let row = document.getElementById("row-"+id);
 
@@ -637,7 +648,7 @@ function editOperatorName(id,name){
 
   row.insertAdjacentHTML("afterend", html);
 
-  openedServicesRow = row.nextElementSibling;
+  openedServices = row.nextElementSibling;
 }
 
 async function saveOperatorName(id){
@@ -652,7 +663,8 @@ body:JSON.stringify({name})
 
 if (!res) return;
 
-loadOperators()
+loadOperators();
+resetOpened();
 }
 
 ////////////////////////////////////////
@@ -660,12 +672,12 @@ loadOperators()
 ////////////////////////////////////////
 
 function editOperatorWindow(id,current){
-  if(openedServicesRow && openedServicesRow.dataset.type === "window" && openedServicesRow.dataset.operatorId == id){
-    openedServicesRow.remove();
-    openedServicesRow = null;
+  if(openedServices && openedServices.dataset.type === "window" && openedServices.dataset.operatorId == id){
+    openedServices.remove();
+    openedServices = null;
     return;
   }
-  openedServicesRow?.remove();
+  openedServices?.remove();
 
   let html = '<tr class="windowRow" data-operator-id="'+id+'" data-type="window">' +
              '<td></td><td></td><td></td>' +
@@ -679,7 +691,7 @@ function editOperatorWindow(id,current){
   let row = document.getElementById("row-"+id);
   row.insertAdjacentHTML("afterend",html);
 
-  openedServicesRow = row.nextElementSibling;
+  openedServices = row.nextElementSibling;
 }
 
 async function saveOperatorWindow(id){
@@ -704,43 +716,42 @@ if(!r.ok){
   }
   let err = {};
   try { err = await r.json(); } catch (_) {}
-  alert(err.detail || "Не удалось сохранить окно оператора");
+  alert(err.detail || "Не удалось сохранить рабочее место оператора");
   return;
 }
 
-loadOperators()
+loadOperators();
+resetOpened();
 }
 
 ////////////////////////////////////////
 //////// услуги окна
 ////////////////////////////////////////
 
-//let openedServicesRow = null;
+//let openedServices = null;
 
 async function editServices(window_id) {
-    if (openedServicesRow && openedServicesRow.dataset.operatorId == window_id) {
-        openedServicesRow.remove();
-        openedServicesRow = null;
+    if (openedServices && openedServices.dataset.windowId == window_id) {
+        openedServices.remove();
+        openedServices = null;
         return;
     }
-    openedServicesRow?.remove();
 
-    // Загружаем текущие услуги окна
+    openedServices?.remove();
+    openedServices = null;
+
     let ws = await fetchJSON(`${API}/window-services/${window_id}`);
-    
-    // Создаем карту: ID услуги -> Приоритет
+
     let selectedMap = {};
     if (Array.isArray(ws)) {
         ws.forEach(item => {
-            // Если в БД приоритет null, используем 1
             selectedMap[item.service_id] = item.priority ?? 1;
         });
     }
 
-    let html = `<tr id="servicesRow" data-operator-id="${window_id}">
-        <td colspan="3"></td>
-        <td>
-            <div class="servicesBoxServices" style="max-width:600px; background:#fff; padding:15px; border:1px solid #ccc; border-radius:8px;">
+    let html = `<tr id="servicesRow" data-window-id="${window_id}">
+        <td colspan="4">
+            <div class="servicesBoxServices" style="max-width:600px; background:#fff; padding:15px; border:1px solid #ccc; border-radius:8px; margin:10px auto;">
                 <b>Настройка услуг (меньше число - выше приоритет)</b><br><br>`;
 
 	if (!services.length) {
@@ -773,7 +784,7 @@ async function editServices(window_id) {
 
     let row = document.getElementById(`window-${window_id}`);
     row.insertAdjacentHTML("afterend", html);
-    openedServicesRow = document.getElementById("servicesRow");
+    openedServices = document.getElementById("servicesRow");
 }
 
 async function saveServicesWithPriority(windowId) {
@@ -804,6 +815,7 @@ async function saveServicesWithPriority(windowId) {
     if (res) {
         alert("Настройки сохранены");
         loadWindows();
+		resetOpened();
     }
 }
 
@@ -839,12 +851,13 @@ async function saveServices(window_id) {
 
         alert("Изменения успешно сохранены");
         // Закрываем строку настроек
-        openedServicesRow.remove();
-        openedServicesRow = null;
+        openedServices.remove();
+        openedServices = null;
     } catch (e) {
         console.error("Save error:", e);
         alert("Ошибка при сохранении приоритетов");
     }
+	resetOpened();
 }
 
 ////////////////////////////////////////
@@ -915,15 +928,15 @@ setForm("")
 
 async function editLoginPassword(operator_id) {
     // Если окно уже открыто для этого оператора — закрываем его
-    if (openedServicesRow && openedServicesRow.dataset.operatorId == operator_id) {
-        openedServicesRow.remove();
-        openedServicesRow = null;
+    if (openedServices && openedServices.dataset.operatorId == operator_id) {
+        openedServices.remove();
+        openedServices = null;
         return;
     }
 
     // Закрываем любое другое открытое окно
-    openedServicesRow?.remove();
-    openedServicesRow = null;
+    openedServices?.remove();
+    openedServices = null;
 
     // Получаем данные оператора
     let op = operators.find(o => o.id === operator_id);
@@ -949,7 +962,7 @@ let html = `
     let row = document.getElementById(`row-${operator_id}`);
     row.insertAdjacentHTML("afterend", html);
 
-    openedServicesRow = document.getElementById("loginPassRow");
+    openedServices = document.getElementById("loginPassRow");
 }
 
 async function saveLoginPassword(operator_id) {
@@ -988,15 +1001,17 @@ async function saveLoginPassword(operator_id) {
     alert("Данные входа обновлены");
     
     // Очистка интерфейса (из вашего исходного кода)
-    if (typeof openedServicesRow !== 'undefined' && openedServicesRow) {
-        openedServicesRow.remove();
-        openedServicesRow = null;
+    if (typeof openedServices !== 'undefined' && openedServices) {
+        openedServices.remove();
+        openedServices = null;
     }
-
+	
+	resetOpened();
     loadOperators();
 }
 
 async function loadExtraSettings() {
+	resetOpened();
     document.getElementById("form").style.display = "block";
     document.getElementById("table").style.display = "none";
     setTable("");
@@ -1215,6 +1230,7 @@ async function ExitPage() {
 
 // In admin.js
 async function loadMedia() {
+	resetOpened();
 	// Показываем форму и таблицу обратно
     document.getElementById("form").style.display = "block";
     document.getElementById("table").style.display = "table";
