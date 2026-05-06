@@ -120,3 +120,18 @@ h1 {
     text-align: center;
     white-space: normal;
 }
+
+body::after {
+    content: "@2026 ВСГУТУ кафедра ВиРС, Баташов Д. И.";
+    position: fixed;
+    left: 16px;
+    bottom: 12px;
+    z-index: 9999;
+
+    font-size: 14px;
+    font-weight: 500;
+    color: rgba(0, 0, 0, 0.35);
+
+    pointer-events: none;
+    user-select: none;
+}
