@@ -419,7 +419,7 @@ input:checked + .slider:before {
 body::after {
     content: "@2026 ВСГУТУ кафедра ВиРС, Баташов Д. И.";
     position: fixed;
-    left: 16px;
+    right: 16px;
     bottom: 10px;
     z-index: 9999;
 

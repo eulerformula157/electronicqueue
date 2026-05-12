@@ -180,6 +180,58 @@ def verify_admin_session(session_id: str = Header(None)):
         
     return admin
 
+def init_ticket_numbering(engine):
+    ddl = """
+    CREATE SEQUENCE IF NOT EXISTS ticket_number_seq START 1;
+
+    CREATE TABLE IF NOT EXISTS ticket_counter_state (
+        id int PRIMARY KEY DEFAULT 1,
+        current_day date NOT NULL,
+        CONSTRAINT single_row CHECK (id = 1)
+    );
+
+    INSERT INTO ticket_counter_state (id, current_day)
+    VALUES (1, CURRENT_DATE)
+    ON CONFLICT (id) DO NOTHING;
+
+    CREATE OR REPLACE FUNCTION public.ticket_number_trigger()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    DECLARE
+        v_old_day date;
+    BEGIN
+        SELECT current_day INTO v_old_day
+        FROM ticket_counter_state
+        WHERE id = 1
+        FOR UPDATE;
+
+        IF v_old_day < CURRENT_DATE THEN
+            PERFORM setval('ticket_number_seq', 1, false);
+            UPDATE ticket_counter_state
+            SET current_day = CURRENT_DATE
+            WHERE id = 1;
+        END IF;
+
+        IF NEW.number IS NULL THEN
+            NEW.number := nextval('ticket_number_seq')::text;
+        END IF;
+
+        RETURN NEW;
+    END;
+    $$;
+
+    DROP TRIGGER IF EXISTS ticket_number_before_insert ON tickets;
+
+    CREATE TRIGGER ticket_number_before_insert
+    BEFORE INSERT ON tickets
+    FOR EACH ROW
+    EXECUTE FUNCTION public.ticket_number_trigger();
+    """
+
+    with engine.begin() as conn:
+        conn.execute(text(ddl))
+
 # Разрешение для CORS
 
 app.add_middleware(
@@ -2616,6 +2668,9 @@ async def get_tts_audio(text: str = Query(..., min_length=1, max_length=200)):
 
 @app.on_event("startup")
 async def startup():
+    Base.metadata.create_all(bind=engine)
+    init_ticket_numbering(engine)
+
     asyncio.create_task(cleanup_sessions())
  
 
