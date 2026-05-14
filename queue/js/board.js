@@ -10,7 +10,6 @@ let currentlyCallingId = null;
 const pendingDrawTicketIds = new Set();
 let latestTickets = [];
 
-
 let currentPage = 0;
 let pages = [];
 let pageTimer = null;
@@ -45,7 +44,6 @@ function updateClock() {
 }
 
 /* ================= MESSAGE ================= */
-
 function getTicketId(ticket) {
     return String(ticket.id || ticket.ticket_id || ticket.ticket_number || ticket.number);
 }
@@ -78,7 +76,6 @@ function handleMessage(event) {
 
         processedTickets.set(ticketId, Date.now());
         pendingDrawTicketIds.add(ticketId);
-
         // Сразу перерисовываем список без этого тикета,
         // если он уже успел появиться из board_state.
         renderLatestTickets();
@@ -107,7 +104,6 @@ function handleMessage(event) {
 			}
 		});
     };
-
     // Новое событие вызова: именно оно запускает озвучку и показ
     if (data.type === "ticket_called") {
         if (data.call_id && processedCallIds.has(data.call_id)) {
@@ -130,7 +126,6 @@ function handleMessage(event) {
 
         return;
     }
-
     // Состояние табло только сохраняем и рисуем.
     // Новые вызванные тикеты, которые ждут озвучку, скрываем.
     if (data.tickets || Array.isArray(data)) {
@@ -144,7 +139,6 @@ function handleMessage(event) {
 
         return;
     }
-
     // Старый recall оставляем для совместимости
     if (data.type === "recall_ticket" || data.ticket_number) {
         let realId = data.ticket_id || data.id;
@@ -177,7 +171,6 @@ setInterval(() => {
 }, 5 * 60 * 1000);
 
 /* ================= BOARD ================= */
-
 function updateBoard(tickets){
     pages = [];
     for(let i = 0; i < tickets.length; i += PAGE_SIZE){

@@ -52,7 +52,6 @@ app = FastAPI()
 #app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None) - использовать когда закончишь разработку
 
 # для WebSocket
-
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Set[WebSocket] = set()
@@ -94,9 +93,7 @@ class ConnectionManager:
                 # Если соединение мертво, просто игнорируем
                 pass
 
-
 manager = ConnectionManager()   
-
 
 class OperatorConnectionManager:
     def __init__(self):
@@ -244,10 +241,8 @@ app.add_middleware(
 
 
 # чтобы заработали мои html
-
 from fastapi.staticfiles import StaticFiles
 app.mount("/queue", StaticFiles(directory="queue"), name="queue")
-
 
 # ------------------ Модели SQLAlchemy и Pydantic схемы ------------------
 
@@ -423,7 +418,6 @@ class SystemSettingsUpdate(BaseModel):
     call_message_template: str
     board_ticket_template: str
 
-
 class SystemSettingsResponse(BaseModel):
     print_ticket: bool
     show_print_badge: bool
@@ -438,16 +432,15 @@ class PublicSettingsResponse(BaseModel):
     print_ticket: bool
     show_print_badge: bool
 
+# ------------------ Дополнительные функции ------------------
 
 def _str_to_bool(value: str, default: bool = False) -> bool:
     if value is None:
         return default
     return str(value).lower() in {"1", "true", "yes", "on"}
 
-
 def _bool_to_str(value: bool) -> str:
     return "true" if value else "false"
-
 
 def get_or_create_system_settings(db: Session) -> SystemSettings:
     settings = db.query(SystemSettings).filter(SystemSettings.id == 1).first()
@@ -459,7 +452,6 @@ def get_or_create_system_settings(db: Session) -> SystemSettings:
     db.commit()
     db.refresh(settings)
     return settings
-
 
 def get_system_settings_dict(db: Session) -> dict:
     settings = get_or_create_system_settings(db)
@@ -476,7 +468,6 @@ def get_system_settings_dict(db: Session) -> dict:
         "board_ticket_template": settings.board_ticket_template or "Билет <number> -> окно <window>",
     }
 
-
 def sanitize_media_filename(filename: str) -> str:
     if not filename:
         raise HTTPException(status_code=400, detail="Имя файла отсутствует")
@@ -491,7 +482,6 @@ def sanitize_media_filename(filename: str) -> str:
         raise HTTPException(status_code=400, detail="Недопустимое расширение файла")
 
     return safe_name
-
 
 def build_media_file_path(filename: str) -> str:
     media_dir = os.path.abspath("queue/media")
@@ -567,8 +557,6 @@ async def assign_unassigned_waiting_tickets(db: Session):
 
     for ticket in tickets:
         assign_ticket_to_least_loaded_window(db, ticket)
-
-# ------------------ Дополнительные функции ------------------
 
 def get_called_tickets():
     db = SessionLocal()
@@ -822,7 +810,6 @@ def get_password_hash(password: str) -> str:
     hashed = bcrypt.hashpw(pwd_bytes, salt)
     return hashed.decode("utf-8")  # возвращаем строку для сохранения в БД
 
-
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     # Проверяем совпадение чистого пароля и хэша из БД
     return bcrypt.checkpw(
@@ -848,7 +835,6 @@ def build_ticket_tts_text(ticket_number: int, window_name: str) -> str:
         )
     finally:
         db.close()    
-
 
 async def broadcast_ticket_called(ticket: Ticket, window: Window):
     db = SessionLocal()
@@ -888,6 +874,147 @@ async def broadcast_ticket_called(ticket: Ticket, window: Window):
         "tts_text": tts_text
     })
 
+# ------------------ WebSocket Эндпоинты ------------------
+
+@app.websocket("/ws/terminal")
+async def websocket_endpoint(websocket: WebSocket):
+    """
+    Общий WebSocket‑канал для терминалов, операторов и админки.
+    Cюда же приходят небольшие heartbeat‑сообщения:
+    {"type": "ping", "session_id": "..."} — мы обновляем last_seen в БД.
+    """
+    db: Session = SessionLocal()
+    await manager.connect(websocket)
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                message = json.loads(raw)
+            except Exception:
+                # Игнорируем некорректный JSON, чтобы не ронять соединение
+                continue
+
+            msg_type = message.get("type")
+
+            # WebSocket heartbeat: обновляем last_seen по session_id
+            if msg_type == "ping":
+                session_id = message.get("session_id")
+                if not session_id:
+                    continue
+
+                try:
+                    # Пытаемся найти сначала операторскую, затем админскую сессию
+                    session = db.query(UserSession).filter(
+                        UserSession.session_id == session_id
+                    ).first()
+                    if not session:
+                        session = db.query(AdminSession).filter(
+                            AdminSession.session_id == session_id
+                        ).first()
+
+                    if session:
+                        session.last_seen = datetime.now()
+                        db.commit()
+                        # Сохраняем mapping сокет -> session_id
+                        ws_id = id(websocket)
+                        manager.ws_id_to_session_id[ws_id] = session_id
+                        manager.session_id_to_ws[session_id] = websocket
+                    else:
+                        # Если сессии нет в БД — уведомляем клиента и закрываем WS
+                        await websocket.send_json({"type": "session_expired"})
+                        await websocket.close()
+                        break
+                except Exception:
+                    db.rollback()
+                continue
+
+            # Обрабатываем старые типы служебных сообщений
+            if msg_type == "queue_updated":
+                await manager.broadcast({"type": "queue_updated"})
+            elif msg_type == "services_updated":
+                await manager.broadcast({"type": "services_updated"})
+
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    finally:
+        db.close()
+
+@app.websocket("/ws/board")
+async def websocket_board(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        # при подключении сразу отправляем текущее состояние
+        tickets_data = get_called_tickets()  # массив с window_name и number
+        await websocket.send_json(tickets_data)
+
+        while True:
+            await websocket.receive_text()  # держим соединение живым
+
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+        
+@app.websocket("/ws/operator/{operator_id}")
+async def websocket_operator(websocket: WebSocket, operator_id: int):
+    db = SessionLocal()
+    await websocket.accept()
+    try:
+        # подключаем оператора к менеджеру
+        await operatorManager.connect(operator_id, websocket)
+
+        # при подключении сразу отправляем текущие данные
+        operator_data = get_operator_state(operator_id)
+        await websocket.send_json(operator_data)
+
+        # держим соединение живым
+        while True:
+            try:
+                await websocket.receive_text()
+            except WebSocketDisconnect:
+                print(f"Оператор {operator_id} отключился")
+                break  # выходим из цикла
+
+    except Exception as e:
+        print(f"Ошибка в websocket_operator: {e}")
+
+    finally:
+        # всегда выполняем отсоединение и очистку базы
+        operatorManager.disconnect(operator_id)
+
+        try:
+            settings = get_system_settings_dict(db)
+            # удаляем все сессии этого оператора
+            sessions = db.query(UserSession).filter(UserSession.operator_id == operator_id).all()
+            for s in sessions:
+                db.delete(s)
+
+            # делаем окно offline
+            operator = db.query(Operator).filter(Operator.id == operator_id).first()
+            if operator and operator.window_id:
+                window = db.query(Window).filter(Window.id == operator.window_id).first()
+                if window:
+                    window.status = "offline"
+                    db.flush()
+                    await reassign_waiting_tickets_from_window(db, window.id)
+                    update_services_status_for_window(db, window.id)
+
+                    if settings["active_ticket_on_operator_logout"] == "return_to_queue":
+                        active_ticket = db.query(Ticket).filter(
+                            Ticket.window_id == operator.window_id,
+                            Ticket.status == "called"
+                        ).first()
+                        if active_ticket:
+                            active_ticket.status = "waiting"
+                            active_ticket.window_id = None
+
+            db.commit()
+        except Exception as e:
+            print(f"Ошибка при очистке базы для оператора {operator_id}: {e}")
+        finally:
+            db.close()
+
+        # уведомляем всех терминалы
+        await manager.broadcast({"type": "services_updated"})
+   
 # ------------------ Эндпоинты ------------------
 
 @app.post("/services/", tags=["Services"])
@@ -909,7 +1036,7 @@ async def create_service(service: ServiceCreate, admin: Admin = Depends(verify_a
 def list_services(
     skip: int = Query(0, ge=0),
     limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT)
-):
+    ):
     db = SessionLocal()
     services = db.query(Service).order_by(Service.id).offset(skip).limit(limit).all()
     db.close()
@@ -918,7 +1045,6 @@ def list_services(
 @app.patch("/services/{service_id}", tags=["Services"])
 async def rename_service(service_id: int, data: ServiceRename, admin: Admin = Depends(verify_admin_session)):
     db = SessionLocal()
-
     service = db.query(Service).filter(Service.id == service_id).first()
 
     if not service:
@@ -926,7 +1052,6 @@ async def rename_service(service_id: int, data: ServiceRename, admin: Admin = De
         raise HTTPException(status_code=404, detail="Service not found")
 
     service.name = data.name
-
     db.commit()
     
     await manager.broadcast({
@@ -956,15 +1081,12 @@ async def update_service_status(
         service.status = data.status
         db.commit()
         db.refresh(service)
-
-        # Бродкаст через WebSocket, чтобы фронт обновился
         await manager.broadcast({"type": "services_updated"})
 
         return {"id": service.id, "status": service.status}
     finally:
         db.close()
  
-
 def get_current_terminal(session_id: str = Header(None)):
     if not session_id:
         raise HTTPException(status_code=401, detail="Session ID missing")
@@ -989,7 +1111,7 @@ def get_current_terminal(session_id: str = Header(None)):
 async def create_ticket(
     ticket: TicketCreate,
     _auth = Depends(get_current_terminal) 
-):
+    ):
     db = SessionLocal()
     try:
         settings = get_system_settings_dict(db)
@@ -1265,7 +1387,7 @@ def get_my_queue(
     skip: int = Query(0, ge=0),
     limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
     operator: Operator = Depends(verify_session)
-):
+    ):
     db = SessionLocal()
     settings = get_system_settings_dict(db)
     try:
@@ -1401,13 +1523,6 @@ async def redirect_ticket(data: RedirectRequest, operator: Operator = Depends(ve
     finally:
         db.close()
 
-#@app.get("/tickets/", tags=["Tickets"])
-#def list_tickets():
-#    db = SessionLocal()
-#    tickets = db.query(Ticket).all()
-#    db.close()
-#    return tickets
-    
 @app.post("/tickets/recall", tags=["Tickets"])
 async def recall_ticket(operator: Operator = Depends(verify_session)):
     db = SessionLocal()
@@ -1458,7 +1573,6 @@ def create_operator(
     db = SessionLocal()
     try:
         # 1. Хэшируем пароль перед сохранением в базу
-        # (функцию get_password_hash мы создали на прошлом шаге)
         hashed_password = get_password_hash(operator.password)
 
         # 2. Создаем объект оператора с хэшированным паролем
@@ -1492,7 +1606,7 @@ async def list_operators(
     skip: int = Query(0, ge=0),
     limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
     admin: Admin = Depends(verify_admin_session)
-):
+    ):
     db = SessionLocal()
     try:
         # Получаем всех операторов из базы
@@ -1514,11 +1628,10 @@ async def list_operators(
         # Блок finally гарантирует, что база закроется даже при ошибке
         db.close()
 
-
 @app.post("/windows/", tags=["Windows"])
 def create_window(window: WindowCreate, admin: Admin = Depends(verify_admin_session)):
     db = SessionLocal()
-    # Проверяем, нет ли уже окна с таким именем (опционально, но полезно)
+    # Проверяем, нет ли уже окна с таким именем
     existing = db.query(Window).filter(Window.name == window.name).first()
     if existing:
         raise HTTPException(status_code=400, detail="Window already exists")
@@ -1534,7 +1647,7 @@ async def list_windows(
     skip: int = Query(0, ge=0),
     limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
     admin: Admin = Depends(verify_admin_session)
-):
+    ):
     db = SessionLocal()
     windows = db.query(Window).order_by(Window.id).offset(skip).limit(limit).all()
     db.close()
@@ -1545,7 +1658,7 @@ async def update_window_status(
     window_id: int,
     data: WindowStatusUpdate = Body(...),
     admin: Admin = Depends(verify_admin_session)
-):
+    ):
     db = SessionLocal()
     try:
         window = db.query(Window).filter(Window.id == window_id).first()
@@ -1601,7 +1714,7 @@ def list_window_services(
     skip: int = Query(0, ge=0),
     limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
     admin: Admin = Depends(verify_admin_session)
-):
+    ):
     db = SessionLocal()
     result = db.query(WindowService).order_by(WindowService.window_id, WindowService.service_id).offset(skip).limit(limit).all()
     db.close()
@@ -1671,6 +1784,7 @@ async def delete_window_service(window_id: int, service_id: int, admin: Admin = 
     db.close()
 
     return {"status":"ok"}
+    
 @app.post("/login", tags=["Auth"])
 async def login(data: LoginRequest):
     db = SessionLocal()
@@ -2034,8 +2148,7 @@ async def delete_operator(operator_id: int, admin: Admin = Depends(verify_admin_
     db.commit()
     db.close()
     return {"status": "ok"}
-    
-   
+      
 @app.patch("/operators/{operator_id}", tags=["Operators"])
 async def update_operator(operator_id: int, data: dict, admin: Admin = Depends(verify_admin_session)):
 
@@ -2083,7 +2196,7 @@ def update_operator_login(
     operator_id: int = Path(..., gt=0), 
     data: OperatorLoginUpdate = Body(...), 
     admin: Admin = Depends(verify_admin_session)
-):
+ ):
     db: Session = SessionLocal()
     try:
         operator = db.query(Operator).filter(Operator.id == operator_id).first()
@@ -2114,151 +2227,7 @@ def update_operator_login(
 @app.get("/operator/dashboard", tags=["Operators"])
 def get_dashboard_data(operator: Operator = Depends(verify_session)):
     return get_operator_state(operator.id)
-
-# ------------------ WebSocket Эндпоинты ------------------
-
-@app.websocket("/ws/terminal")
-async def websocket_endpoint(websocket: WebSocket):
-    """
-    Общий WebSocket‑канал для терминалов, операторов и админки.
-    Теперь сюда же приходят небольшие heartbeat‑сообщения:
-    {"type": "ping", "session_id": "..."} — мы обновляем last_seen в БД.
-    """
-    db: Session = SessionLocal()
-    await manager.connect(websocket)
-    try:
-        while True:
-            raw = await websocket.receive_text()
-            try:
-                message = json.loads(raw)
-            except Exception:
-                # Игнорируем некорректный JSON, чтобы не ронять соединение
-                continue
-
-            msg_type = message.get("type")
-
-            # WebSocket heartbeat: обновляем last_seen по session_id
-            if msg_type == "ping":
-                session_id = message.get("session_id")
-                if not session_id:
-                    continue
-
-                try:
-                    # Пытаемся найти сначала операторскую, затем админскую сессию
-                    session = db.query(UserSession).filter(
-                        UserSession.session_id == session_id
-                    ).first()
-                    if not session:
-                        session = db.query(AdminSession).filter(
-                            AdminSession.session_id == session_id
-                        ).first()
-
-                    if session:
-                        session.last_seen = datetime.now()
-                        db.commit()
-                        # Сохраняем mapping сокет -> session_id
-                        ws_id = id(websocket)
-                        manager.ws_id_to_session_id[ws_id] = session_id
-                        manager.session_id_to_ws[session_id] = websocket
-                    else:
-                        # Если сессии нет в БД — уведомляем клиента и закрываем WS
-                        await websocket.send_json({"type": "session_expired"})
-                        await websocket.close()
-                        break
-                except Exception:
-                    db.rollback()
-                continue
-
-            # Обрабатываем старые типы служебных сообщений
-            if msg_type == "queue_updated":
-                await manager.broadcast({"type": "queue_updated"})
-            elif msg_type == "services_updated":
-                await manager.broadcast({"type": "services_updated"})
-
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-    finally:
-        db.close()
-
-
-@app.websocket("/ws/board")
-async def websocket_board(websocket: WebSocket):
-    await manager.connect(websocket)
-    try:
-        # при подключении сразу отправляем текущее состояние
-        tickets_data = get_called_tickets()  # массив с window_name и number
-        await websocket.send_json(tickets_data)
-
-        while True:
-            await websocket.receive_text()  # держим соединение живым
-
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-        
-
-@app.websocket("/ws/operator/{operator_id}")
-async def websocket_operator(websocket: WebSocket, operator_id: int):
-    db = SessionLocal()
-    await websocket.accept()
-    try:
-        # подключаем оператора к менеджеру
-        await operatorManager.connect(operator_id, websocket)
-
-        # при подключении сразу отправляем текущие данные
-        operator_data = get_operator_state(operator_id)
-        await websocket.send_json(operator_data)
-
-        # держим соединение живым
-        while True:
-            try:
-                await websocket.receive_text()
-            except WebSocketDisconnect:
-                print(f"Оператор {operator_id} отключился")
-                break  # выходим из цикла
-
-    except Exception as e:
-        print(f"Ошибка в websocket_operator: {e}")
-
-    finally:
-        # всегда выполняем отсоединение и очистку базы
-        operatorManager.disconnect(operator_id)
-
-        try:
-            settings = get_system_settings_dict(db)
-            # удаляем все сессии этого оператора
-            sessions = db.query(UserSession).filter(UserSession.operator_id == operator_id).all()
-            for s in sessions:
-                db.delete(s)
-
-            # делаем окно offline
-            operator = db.query(Operator).filter(Operator.id == operator_id).first()
-            if operator and operator.window_id:
-                window = db.query(Window).filter(Window.id == operator.window_id).first()
-                if window:
-                    window.status = "offline"
-                    db.flush()
-                    await reassign_waiting_tickets_from_window(db, window.id)
-                    update_services_status_for_window(db, window.id)
-
-                    if settings["active_ticket_on_operator_logout"] == "return_to_queue":
-                        active_ticket = db.query(Ticket).filter(
-                            Ticket.window_id == operator.window_id,
-                            Ticket.status == "called"
-                        ).first()
-                        if active_ticket:
-                            active_ticket.status = "waiting"
-                            active_ticket.window_id = None
-
-            db.commit()
-        except Exception as e:
-            print(f"Ошибка при очистке базы для оператора {operator_id}: {e}")
-        finally:
-            db.close()
-
-        # уведомляем всех терминалы
-        await manager.broadcast({"type": "services_updated"})
-        
-        
+    
 @app.get("/operators/details", tags=["Operators"])
 async def get_my_details(operator: Operator = Depends(verify_session)):
     db = SessionLocal()
@@ -2447,12 +2416,11 @@ async def get_admin_settings(admin: Admin = Depends(verify_admin_session)):
         await manager.broadcast({"type": "queue_updated"})
         db.close()
 
-
 @app.put("/admin/settings", response_model=SystemSettingsResponse, tags=["Admin"])
 async def update_admin_settings(
     data: SystemSettingsUpdate,
     admin: Admin = Depends(verify_admin_session)
-):
+    ):
     if data.default_operator_status not in {"online", "break", "offline"}:
         raise HTTPException(status_code=400, detail="Некорректный default_operator_status")
 
@@ -2505,7 +2473,6 @@ async def update_admin_settings(
     finally:
         db.close()
 
-
 @app.get("/settings/public", response_model=PublicSettingsResponse, tags=["Settings"])
 async def get_public_settings():
     db = SessionLocal()
@@ -2554,53 +2521,13 @@ def normalize_tts_input(value: str) -> str:
         raise HTTPException(status_code=400, detail="Слишком длинный текст для озвучки")
 
     return value
-
-
-#@app.get("/tts/create", tags=["TTS"])
-#def create_tts_file(text: str = Query(..., min_length=1, max_length=200)):
-#    text = normalize_tts_input(text)
-#
-#    os.makedirs(TTS_CACHE_DIR, exist_ok=True)
-#
-#    output_path = os.path.join(TTS_CACHE_DIR, "last_tts.wav")
-#
-#    result = subprocess.run(
-#        [
-#            PIPER_PATH,
-#            "--model", PIPER_MODEL,
-#            "--output_file", output_path,
-#            "--length-scale", TTS_LENGTH_SCALE,
-#            "--noise-scale", TTS_NOISE_SCALE,
-#            "--noise-w-scale", TTS_NOISE_W_SCALE,
-#        ],
-#        input=text,
-#        text=True,
-#        stdout=subprocess.PIPE,
-#        stderr=subprocess.PIPE,
-#        check=False,
-#    )
-#
-#    if result.returncode != 0:
-#        raise HTTPException(status_code=500, detail=f"Piper error: {result.stderr}")
-#
-#    if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-#        raise HTTPException(status_code=500, detail="TTS файл не создан или пустой")
-#
-#    return {
-#        "status": "saved",
-#        "file_path": os.path.abspath(output_path),
-#        "file_size": os.path.getsize(output_path)
-#    }
-    
-    
+  
 tts_locks: dict[str, asyncio.Lock] = {}
-
 
 def get_tts_lock(file_hash: str) -> asyncio.Lock:
     if file_hash not in tts_locks:
         tts_locks[file_hash] = asyncio.Lock()
     return tts_locks[file_hash]
-
 
 def run_piper_sync(text: str, output_path: str):
     return subprocess.run(
@@ -2618,7 +2545,6 @@ def run_piper_sync(text: str, output_path: str):
         stderr=subprocess.PIPE,
         check=False,
     )
-
 
 @app.get("/tts/audio", tags=["TTS"])
 async def get_tts_audio(text: str = Query(..., min_length=1, max_length=200)):
@@ -2673,7 +2599,5 @@ async def startup():
 
     asyncio.create_task(cleanup_sessions())
  
-
-
 # ------------------ Создание таблиц ------------------
 Base.metadata.create_all(bind=engine)

@@ -30,7 +30,6 @@ document.addEventListener("DOMContentLoaded", () => {
 		const isCaps = event.getModifierState("CapsLock");
 		let lang = "";
 
-		// Detect language based on character codes
 		if (event.key && event.key.length === 1) {
 			if (/[а-яА-ЯёЁ]/.test(event.key)) {
 				lang = "RU";
@@ -49,7 +48,6 @@ document.addEventListener("DOMContentLoaded", () => {
 		
 		warningDiv.innerHTML = content;
 
-		// Toggle visibility class to prevent jumps
 		if (content !== "") {
 			warningDiv.classList.add("visible");
 		} else {
@@ -62,9 +60,7 @@ document.addEventListener("DOMContentLoaded", () => {
 		input.addEventListener("keydown", checkKeyboard);
 		
 		input.addEventListener("blur", () => { 
-			// Hide the warning properly when focus is lost
 			warningDiv.classList.remove("visible");
-			// Optional: clear content after the fade-out
 			setTimeout(() => { warningDiv.innerHTML = ""; }, 200);
 		});
 	});
@@ -76,7 +72,6 @@ let isSubmitting = false;
 async function submitLogin() {
     if (isSubmitting) return;
     isSubmitting = true;
-
     // Блокируем повторный клик на кнопке до завершения запроса
     const btn = document.getElementById("login-btn");
     if (btn) btn.disabled = true;

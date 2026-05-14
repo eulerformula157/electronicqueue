@@ -1,0 +1,1278 @@
+/* style.css — объединённый файл для login/operator/terminal/admin/board/board-media.
+   Стили страниц разделены на соответствующие классы, нужно обновить <body>:
+   login-page, operator-page, terminal-page, admin-page, board-page, board-media-page. */
+
+:root {
+    --primary: #003366;
+    --primary-hover: #004080;
+    --accent: #00aaff;
+    --success: #28a745;
+    --danger: #dc3545;
+    --warning: #ffc107;
+    --button-action: #e05d1b;
+    --bg: #f4f7f9;
+    --card-bg: #ffffff;
+    --text-main: #002244;
+    --text-muted: #6c757d;
+    --shadow: 0 4px 12px rgba(0, 51, 102, 0.08);
+
+    --button-height: 160px;
+    --button-width: 320px;
+    --button-gap: 24px;
+}
+
+html {
+    height: 100%;
+}
+
+body::after {
+    content: "@2026 ВСГУТУ кафедра ВиРС, Баташов Д. И.";
+    position: fixed;
+    left: 16px;
+    bottom: 12px;
+    z-index: 9999;
+    font-size: 14px;
+    font-weight: 500;
+    color: rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+    user-select: none;
+}
+
+body.operator-page::after,
+body.admin-page::after {
+    left: auto;
+    right: 16px;
+}
+
+body.operator-page::after {
+    bottom: 10px;
+    font-size: 12px;
+    line-height: 1;
+    color: rgba(0, 0, 0, 0.28);
+}
+
+
+/* ===== login.css ===== */
+/* login.css — адаптирован под стиль operator.css */
+body.login-page{
+    margin: 0;
+    padding: 0;
+    font-family: 'Inter', -apple-system, sans-serif; /* Шрифт как в операторе */
+    background-color: var(--bg);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    color: var(--text-main);
+}
+
+
+/* Контейнер формы — теперь это Glass Card */
+body.login-page .login-box{
+    background: var(--card-bg);
+    padding: 50px 40px;
+    border-radius: 16px; /* Единое скругление */
+    box-shadow: var(--shadow);
+    text-align: center;
+    width: 380px;
+    border: 1px solid rgba(0, 51, 102, 0.05);
+}
+
+
+/* Заголовок */
+body.login-page .login-box h2{
+    margin: 0 0 35px 0;
+    color: var(--primary);
+    font-size: 24px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+
+/* Поля ввода */
+body.login-page .login-box input[type="text"],
+body.login-page .login-box input[type="password"]{
+    width: 100%;
+    padding: 14px;
+    margin-bottom: 20px;
+    border: 2px solid #e2e8f0;
+    border-radius: 10px;
+    font-size: 16px;
+    box-sizing: border-box;
+    transition: all 0.2s ease;
+    background: #f8fafc;
+}
+body.login-page .login-box input:focus{
+    outline: none;
+    border-color: var(--accent);
+    background: #fff;
+    box-shadow: 0 0 0 4px rgba(0, 170, 255, 0.1);
+}
+
+
+/* Кнопка — используем стиль btn-primary */
+body.login-page .login-box button{
+    width: 100%;
+    padding: 14px;
+    background: var(--primary);
+    color: white;
+    font-size: 16px;
+    font-weight: 600;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+body.login-page .login-box button:hover{
+    background: var(--primary-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 51, 102, 0.2);
+}
+body.login-page .login-box button:active{
+    transform: translateY(0);
+}
+
+
+/* Ошибка */
+body.login-page #login-error{
+    color: #dc3545; /* var(--danger) */
+    margin-top: 15px;
+    font-size: 14px;
+    font-weight: 500;
+}
+body.login-page .password-wrapper{
+    position: relative;
+    width: 100%;
+    margin-bottom: 20px; 
+}
+body.login-page .password-wrapper input{
+    margin-bottom: 0 !important; /* Overrides the general input margin */
+    padding-right: 45px; 
+}
+
+
+/* Override global button styles completely */
+body.login-page #toggle-password{
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%); /* This now aligns to the true center */
+
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    width: auto !important;
+    height: auto !important;
+    padding: 0 !important; /* Reduced padding for tighter centering */
+    
+    line-height: 1;
+    font-size: 20px;
+    cursor: pointer;
+    color: var(--text-muted);
+}
+body.login-page #toggle-password:hover{
+    transform: translateY(-50%); 
+    opacity: 0.8;
+}
+body.login-page .keyboard-warning{
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--button-action);
+    text-align: left;
+    
+    /* Fixed height reserves the space */
+    height: 20px; 
+    line-height: 20px;
+    
+    /* Add this margin to create the gap between warning and login input */
+    margin-bottom: 10px; 
+    
+    /* Ensure it doesn't push the title too far up */
+    margin-top: -10px; 
+
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+body.login-page .keyboard-warning.visible{
+    opacity: 1;
+}
+body.login-page .warning-item{
+    display: inline-block;
+    background: rgba(224, 93, 27, 0.1);
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-right: 5px;
+}
+
+
+/* ===== operator.css ===== */
+body.operator-page h3{
+    color: var(--primary);       /* Заголовки теперь синие */
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding-bottom: 8px;
+}
+body.operator-page{
+    margin: 0;
+    font-family: 'Inter', -apple-system, sans-serif;
+    background-color: var(--bg);
+    color: var(--text-main);
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;   
+    box-sizing: border-box;
+}
+
+
+/* Верхняя панель управления */
+body.operator-page .header-panel{
+    background: var(--card-bg);
+    padding: 1rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: var(--shadow);
+    z-index: 10;
+}
+body.operator-page .button-group{
+    display: flex;
+    gap: 12px;
+}
+
+
+/* Основной контейнер */
+body.operator-page .main-layout{
+    display: grid;
+    grid-template-columns: 1fr 3fr 1fr;
+    gap: 20px;
+    padding: 20px 20px 44px 20px; /* добавили запас снизу */
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    width: 100%;
+    max-width: 100%;
+    margin: 0 auto;
+    box-sizing: border-box;
+}
+
+
+
+/* Карточки */
+body.operator-page .glass-card{
+    background: var(--card-bg);
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    min-height: 0; 
+    overflow: hidden;
+}
+
+
+/* Центральная зона с номером */
+body.operator-page .display-zone{
+    padding: 40px 20px;
+    min-width: 400px;
+    display: flex; /* Добавлено */
+    flex-direction: column; /* Добавлено */
+    align-items: center; /* Центрирование по горизонтали */
+    justify-content: center; /* Центрирование по вертикали */
+    text-align: center; /* Центрирование текста */
+}
+body.operator-page .ticket-label{
+    font-size: 1.2rem;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+}
+body.operator-page .ticket-number{
+    font-size: 7rem; /* Увеличили обратно, но уберем лишний текст в JS */
+    font-weight: 800;
+    color: var(--primary);
+    line-height: 1;
+    margin: 10px 0 30px 0;
+    letter-spacing: -2px;
+}
+body.operator-page .services-list{
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+body.operator-page .service-tag{
+    background: transparent; /* Убираем фон */
+    color: var(--text-muted) !important;
+    font-size: 1.1rem; /* Сделали чуть крупнее по вашей просьбе */
+    padding: 2px 0; /* Отступы только сверху и снизу */
+    border: none; /* Убираем обводку */
+    display: block; /* Каждая услуга с новой строки для чистоты */
+}
+
+
+/* Очередь */
+body.operator-page .queue-list{
+    overflow-y: auto;
+    padding-right: 10px;
+    min-height: 0; /* критично для flex */
+}
+
+
+/* Сделаем скроллбар более аккуратным в стиле вуза */
+body.operator-page .queue-list::-webkit-scrollbar{
+    width: 6px;
+}
+body.operator-page .queue-list::-webkit-scrollbar-track{
+    background: #f1f5f9;
+    border-radius: 10px;
+}
+body.operator-page .queue-list::-webkit-scrollbar-thumb{
+    background: var(--text-muted);
+    border-radius: 10px;
+}
+body.operator-page .queue-list::-webkit-scrollbar-thumb:hover{
+    background: var(--primary);
+}
+body.operator-page .queue-service-name{
+    /* Удалены white-space: nowrap и ellipsis */
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    line-height: 1.2;
+    font-size: 0.85rem;
+    font-weight: 400;
+    color: var(--text-muted);
+    margin-top: 6px;
+    
+    /* Убираем ограничение ширины или делаем его больше, 
+       чтобы текст мог занимать всю ширину карточки */
+    width: 100%; 
+    display: block; 
+}
+body.operator-page .queue-item{
+    display: flex;
+    flex-direction: column; /* Номер сверху, услуга снизу */
+    align-items: flex-start; /* Прижимаем текст к левому краю */
+    border-bottom: 1px solid #eee;
+    min-height: 70px; /* Немного увеличим для комфорта */
+    background: #f1f5f9;
+    margin-bottom: 12px;
+    padding: 15px 20px;
+    border-radius: 12px;
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--text-main); /* Сделаем номер чуть контрастнее */
+}
+body.operator-page #queue-panel{
+    max-height: 500px; /* Можно чуть увеличить */
+    overflow-y: auto;
+    padding-right: 5px; /* Отступ для скроллбара */
+}
+
+
+/* Кнопки */
+body.operator-page button{
+    border: none;
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 0.9rem;
+}
+body.operator-page .btn-primary{ background: var(--primary); color: white; }
+body.operator-page .btn-primary:hover{ background: var(--primary-hover); }
+body.operator-page .btn-success{ background: var(--success); color: white; }
+body.operator-page .btn-danger{ background: var(--danger); color: white; }
+body.operator-page .btn-success.status-active{
+    background-color: var(--success) !important;
+    box-shadow: 0 0 10px rgba(46, 196, 182, 0.5);
+}
+body.operator-page .btn-warning-active{
+    background-color: var(--warning) !important;
+    color: white !important;
+    border-color: var(--warning) !important;
+}
+body.operator-page .info-status{
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap; /* Чтобы текст не переносился */
+}
+body.operator-page .btn-outline{
+    background: transparent;
+    border: 2px solid #e2e8f0;
+    color: var(--text-main);
+}
+body.operator-page .btn-outline:hover{ background: #f1f5f9; }
+body.operator-page button:disabled{
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+
+/* Статус-бар */
+body.operator-page .status-indicator{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    background: #e2e8f0;
+    font-size: 0.85rem;
+}
+body.operator-page .dot{
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: #8d99ae; /* Серый по умолчанию */
+    transition: all 0.3s ease;
+}
+body.operator-page .dot.online{
+    background-color: var(--success) !important;
+    box-shadow: 0 0 8px var(--success);
+}
+
+
+/* Контейнер всей группы (переключатель + текст) */
+body.operator-page .auto-call-group{
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 0 25px;         /* Отступы слева и справа от кнопок ОНЛАЙН/ПЕРЕРЫВ */
+    padding: 5px 0;
+    min-width: 250px;       /* Фиксированная ширина, чтобы верстка не дергалась при смене текста */
+}
+
+
+/* Сама плашка с переключателем */
+body.operator-page .auto-call-container{
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 18px;
+    background: #edf2f7;    /* Светлый фон, выделяющий блок */
+    border-radius: 12px;
+    border: 1px solid #cbd5e0;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+
+/* Надпись "Автовызов" */
+body.operator-page .auto-call-label{
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: var(--primary);  /* Используем ваш темно-синий цвет */
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+
+/* Главный текст: "Следующий клиент через..." */
+body.operator-page .auto-call-status-text{
+    font-size: 1.25rem;      /* Крупный текст */
+    font-weight: 700;
+    color: var(--success);   /* Зеленый цвет для активного ожидания */
+    min-height: 1.6rem;
+    transition: all 0.3s ease;
+}
+
+
+/* Стили для увеличенного переключателя (Toggle) */
+body.operator-page .switch{
+    position: relative;
+    display: inline-block;
+    width: 48px;
+    height: 24px;
+}
+body.operator-page .switch input{ display: none; }
+body.operator-page .slider{
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: #cbd5e0;
+    transition: .4s;
+    border-radius: 24px;
+}
+body.operator-page .slider:before{
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+}
+body.operator-page input:checked + .slider{
+    background-color: var(--success);
+}
+body.operator-page input:checked + .slider:before{
+    transform: translateX(24px);
+}
+
+
+/* Анимация мигания для текста отсчета (по желанию) */
+body.operator-page @keyframes pulse-text{
+    0% { opacity: 1; }
+    50% { opacity: 0.7; }
+    100% { opacity: 1; }
+}
+body.operator-page .auto-call-status-text:not(:empty){
+    animation: pulse-text 2s infinite;
+}
+
+
+
+/* Контейнер, в котором лежат все ваши кнопки и автовызов */
+body.operator-page .sidebar,
+body.operator-page .controls-column{
+    display: flex;
+    flex-direction: column;
+    height: 100vh;          /* Растягиваем на всю высоту экрана */
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+
+/* Специальный оберточный класс для низа */
+body.operator-page .bottom-controls{
+    margin-top: auto;       /* МАГИЯ: толкает этот блок максимально вниз */
+    padding-top: 20px;      /* Отступ от кнопок выше */
+    border-top: 1px solid #e2e8f0; /* Визуальный разделитель (по желанию) */
+    width: 100%;
+}
+
+
+/* Стили самого автовызова (обновленные) */
+body.operator-page .auto-call-group{
+    display: flex;
+    flex-direction: column;
+    align-items: center;    /* Центрируем, если внизу */
+    gap: 10px;
+}
+body.operator-page .auto-call-container{
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    background: #ffffff;
+    border-radius: 12px;
+    border: 2px solid #edf2f7;
+    box-shadow: 0 -4px 12px rgba(0,0,0,0.05); /* Тень вверх */
+}
+body.operator-page .auto-call-status-text{
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--success);
+    text-align: center;
+}
+body.operator-page .service-row{
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 4px 0;
+}
+body.operator-page .service-priority{
+    font-weight: 800;
+    font-size: 1.2rem;
+    color: var(--primary);
+    min-width: 20px;
+}
+body.operator-page .service-name{
+    font-size: 1.05rem;
+    color: var(--text-muted);
+}
+body.operator-page .current-service{
+    font-size: 1.4rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-top: -10px;
+    margin-bottom: 20px;
+}
+
+
+/* Подпись */
+
+
+/* ===== terminal.css ===== */
+/* --- Константы из интерфейса оператора --- */
+
+
+/* --- Страница --- */
+body.terminal-page{
+    margin: 0;
+    padding: 60px 20px;
+    font-family: 'Inter', -apple-system, sans-serif; /* Шрифт как у оператора */
+    background-color: var(--bg);
+    color: var(--text-main);
+    min-height: 100vh;
+    box-sizing: border-box;
+    cursor: none;
+}
+body.terminal-page h1{
+	text-align: center; 
+    margin-bottom: 50px;
+    color: var(--primary);
+    font-size: 42px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+
+/* --- Контейнер кнопок --- */
+body.terminal-page #services{
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: var(--button-gap);
+    max-width: 1200px;
+    margin: 0 auto 40px auto;
+}
+
+
+/* --- Кнопки (в стиле Glass Card) --- */
+body.terminal-page button.service-btn{
+    width: var(--button-width);
+    height: var(--button-height);
+    font-size: 20px;
+    font-weight: 700;
+    background: var(--card-bg);
+    color: var(--primary);
+    border: 2px solid transparent;
+    border-radius: 20px; /* Более мягкое скругление */
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 20px;
+    box-shadow: var(--shadow);
+    transition: all 0.3s ease;
+    line-height: 1.3;
+}
+body.terminal-page button.service-btn:hover{
+    background: var(--primary);
+    color: #fff;
+    transform: translateY(-5px);
+    box-shadow: 0 8px 20px rgba(0, 51, 102, 0.15);
+}
+body.terminal-page button.service-btn:active{
+    transform: translateY(-1px);
+}
+
+
+/* --- Неактивная услуга --- */
+body.terminal-page button.service-btn.unavailable{
+    background: #e2e8f0;
+    color: var(--text-muted);
+    cursor: not-allowed;
+    opacity: 0.7;
+    transform: none;
+    box-shadow: none;
+}
+
+
+/* --- Уведомление --- */
+body.terminal-page #ticket-notice{
+    display: none; /* Переключается через JS */
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.8); /* Затемнение фона, чтобы скрыть заглушку */
+    z-index: 10000;
+    
+    /* Центрирование контента */
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+body.terminal-page #ticket-notice span{
+    display: block;
+    background: var(--card-bg);
+    color: var(--primary);
+    
+    /* Увеличенные размеры */
+    padding: 80px 100px; 
+    font-size: 56px; 
+    line-height: 1.2;
+    
+    border-radius: 40px;
+    box-shadow: 0 40px 80px rgba(0,0,0,0.5);
+    font-weight: 800;
+    text-align: center;
+    max-width: 85%;
+    box-sizing: border-box;
+}
+body.terminal-page #ticket-notice .timer{
+    font-size: 42px;    
+    color: var(--accent);
+    margin-top: 30px;
+    font-weight: bold;
+}
+
+
+/* --- Стили чека (оставляем строгими для принтера) --- */
+body.terminal-page #print-receipt{
+    /* Эти стили обычно не меняют на "цветные", 
+       так как термопринтер печатает только черным */
+    width: 280px;
+    background: #fff;
+    color: #000;
+}
+body.terminal-page .print-mode-badge{
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 10001;
+    background: rgba(0, 51, 102, 0.9);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 8px 12px;
+    border-radius: 999px;
+    box-shadow: var(--shadow);
+    user-select: none;
+}
+body.terminal-page #vkb{
+    max-width: 700px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+body.terminal-page .vkb-row{
+    display: grid;
+    gap: 10px;
+}
+body.terminal-page #vkb-row-num{ 
+	grid-template-columns: repeat(13, 1fr); 
+}
+body.terminal-page #vkb-row-q{
+	grid-template-columns: 1.3fr repeat(12, 1fr); 
+}
+body.terminal-page #vkb-row-a{
+	grid-template-columns: 1.3fr repeat(10, 1fr) 1.5fr; 
+}
+body.terminal-page #vkb-row-z{ 
+	grid-template-columns: 1.8fr repeat(10, 1fr); 
+}
+body.terminal-page #vkb-row-space{
+    grid-template-columns: 1fr;
+}
+body.terminal-page #vkb-row-actions{
+    grid-template-columns: 1fr 1fr;
+}
+
+
+/* Кнопки */
+body.terminal-page .vkb-key{
+    height: 60px;
+    border-radius: 12px;
+    border: none;
+    background: #fff;
+    font-weight: 700;
+    font-size: 1.05rem;
+}
+
+
+/* Нажатие */
+body.terminal-page .vkb-key:active{
+    transform: translateY(2px);
+    box-shadow: none;
+    background: #f1f5f9;
+}
+
+
+/* Цвета */
+body.terminal-page .vkb-key.action-dark{
+    background: #003366;
+    color: white;
+}
+body.terminal-page .vkb-key.action-green{
+    background: #28a745;
+    color: white;
+}
+body.terminal-page .vkb-key.danger{
+    background: #e11d48;
+    color: white;
+}
+body.terminal-page .vkb-key.shift-active{
+    background: #00aaff;
+    color: white;
+}
+
+
+/* ===== admin.css ===== */
+/* --- Переменные из operator.css --- */
+body.admin-page{
+    margin: 0;
+    font-family: 'Inter', -apple-system, sans-serif;
+    background-color: var(--bg);
+    color: var(--text-main);
+}
+
+
+/* --- Липкая шапка (Sticky Header) --- */
+body.admin-page .sticky-header{
+    background: var(--card-bg);
+    padding: 0.8rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: var(--shadow);
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+}
+body.admin-page header{
+    color: var(--primary);
+    font-weight: 800;
+    font-size: 1.2rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+
+/* --- Табы (Навигация) --- */
+body.admin-page .tabs{
+    display: flex;
+    gap: 8px;
+    background: transparent;
+}
+body.admin-page .tabs button{
+    background: transparent;
+    color: var(--text-muted);
+    border: none;
+    padding: 10px 18px;
+    border-radius: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 0.9rem;
+}
+body.admin-page .tabs button:hover{
+    background: #f1f5f9;
+    color: var(--primary);
+}
+body.admin-page .tabs button.active{
+    background: var(--primary);
+    color: white;
+}
+body.admin-page #tab-exit{
+    color: var(--danger);
+}
+body.admin-page #tab-exit:hover{
+    background: #fff1f0 !important;
+    color: var(--danger) !important;
+}
+
+
+/* --- Контентная область --- */
+body.admin-page .content{
+    margin: 30px auto;
+    padding: 0 20px;
+}
+
+
+/* Стилизация форм и таблиц под glass-card */
+body.admin-page #form,
+body.admin-page table{
+    background: var(--card-bg);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    margin-bottom: 30px;
+    overflow: hidden; /* Чтобы скругления работали */
+}
+body.admin-page #form{
+    padding: 25px;
+}
+
+
+/* --- Таблицы --- */
+body.admin-page table{
+    width: 100%;
+    border-collapse: collapse;
+    border: none;
+}
+body.admin-page th{
+    background: #f8fafc;
+    color: var(--primary);
+    text-align: left;
+    text-transform: uppercase;
+    font-size: 0.8rem;
+    font-weight: 700;
+    padding: 16px;
+    border-bottom: 2px solid #edf2f7;
+}
+body.admin-page td{
+    padding: 14px 16px;
+    border-bottom: 1px solid #edf2f7;
+    font-size: 0.95rem;
+}
+body.admin-page tr:last-child td{
+    border-bottom: none;
+}
+body.admin-page tr:hover td{
+    background-color: #f8fbff;
+}
+
+
+/* --- Кнопки внутри контента --- */
+body.admin-page button:not(.tabs button){
+    border: none;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+
+/* Цвета кнопок (для JS-динамики) */
+body.admin-page .btn-edit{ background: var(--accent); color: white; margin-right: 5px; }
+body.admin-page .btn-delete{ background: var(--danger); color: white; }
+body.admin-page .btn-add{ background: var(--success); color: white; margin-top: 10px; }
+
+
+/* --- Поля ввода в формах --- */
+body.admin-page input,
+body.admin-page select{
+    padding: 10px 14px;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    font-family: inherit;
+    margin-right: 10px;
+    margin-bottom: 10px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+body.admin-page input:focus{
+    border-color: var(--accent);
+}
+
+
+/* --- Доп. настройки (единый стиль) --- */
+body.admin-page .settings-form{
+    max-width: 980px;
+}
+body.admin-page .settings-title{
+    margin: 0 0 20px 0;
+    color: var(--primary);
+    font-size: 1.8rem;
+    font-weight: 800;
+}
+body.admin-page .settings-section{
+    border: 1px solid #e8eef5;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin: 12px 0 16px 0;
+    background: #fcfdff;
+}
+body.admin-page .settings-section-title{
+    margin: 0 0 8px 0;
+    color: var(--primary);
+    font-size: 1rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+body.admin-page .settings-checkbox-row{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 14px 0;
+    font-size: 1.08rem;
+    color: var(--text-main);
+}
+body.admin-page .settings-checkbox-row input[type="checkbox"]{
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    accent-color: var(--primary);
+}
+body.admin-page .settings-field-row{
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin: 18px 0;
+    flex-wrap: wrap;
+}
+body.admin-page .settings-label{
+    min-width: 350px;
+    font-size: 1.08rem;
+    color: var(--text-main);
+}
+body.admin-page .settings-select{
+    min-width: 120px;
+    margin: 0;
+}
+body.admin-page .settings-select-wide{
+    min-width: 240px;
+}
+body.admin-page .settings-actions{
+    margin-top: 22px;
+}
+
+
+/* ===== board.css ===== */
+html,
+body.board-page{
+    height: 100%;
+    margin: 0;
+    font-family: "Segoe UI", Arial, sans-serif;
+    background: #f9f9f9;
+    color: #1a1d23;
+    overflow: hidden;
+}
+body.board-page h1{
+    text-align: center;
+    margin: 15px 0;
+    font-size: 30px;
+    color: #1a1d23;
+}
+body.board-page .clock-container{
+    text-align: center;
+    font-size: 28px;
+    margin-bottom: 10px;
+    font-weight: 500;
+}
+body.board-page .board-wrapper{
+    height: calc(100vh - 120px);
+    padding: 20px;
+}
+body.board-page .board{
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(5, 1fr);
+    gap: 15px;
+    height: 95%;
+}
+body.board-page .card{
+    background: #ffffff;
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    transition: all 0.3s ease;
+}
+body.board-page .ticket,
+body.board-page .arrow,
+body.board-page .window{
+    font-size: 48px;
+    font-weight: 700;
+}
+body.board-page .ticket{
+    color: #2d89ef;
+}
+body.board-page .window{
+    color: #ff7f50;
+}
+body.board-page .arrow{
+    opacity: 0.6;
+}
+body.board-page .status-indicator{
+    position: fixed;
+    bottom: 10px;
+    right: 15px;
+    font-size: 13px;
+    opacity: 0.6;
+}
+
+
+@keyframes call-flash {
+    0% { background: #ffffff; transform: scale(1); }
+    20% { background: #2d89ef; transform: scale(1.05); }
+    40% { background: #ffffff; transform: scale(1); }
+    60% { background: #2d89ef; transform: scale(1.05); }
+    100% { background: #ffffff; transform: scale(1); }
+}
+body.board-page .calling{
+    animation: call-flash 1.5s ease-in-out;
+    border: 3px solid #2d89ef;
+    z-index: 10;
+}
+body.board-page .ticket-display-text{
+    font-size: 3rem;
+    font-weight: 800;
+    text-align: center;
+    line-height: 1.2;
+    word-break: break-word;
+}
+body.board-page .line{
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 56px 1fr;
+    align-items: center;
+    column-gap: 18px;
+}
+body.board-page .ticket{
+    justify-self: end;
+    text-align: center;
+    white-space: normal;
+}
+body.board-page .arrow{
+    justify-self: center;
+    text-align: center;
+    white-space: nowrap;
+    line-height: 1;
+}
+body.board-page .window{
+    justify-self: start;
+    text-align: center;
+    white-space: normal;
+}
+
+
+/* ===== board-media.css ===== */
+html,
+body.board-media-page{
+    height: 100%;
+    margin: 0;
+    font-family: "Segoe UI", Arial, sans-serif;
+    background: #f9f9f9;
+    color: #1a1d23;
+    overflow: hidden;
+}
+body.board-media-page h1{
+    text-align: center;
+    margin: 15px 0;
+    font-size: 30px;
+    color: #1a1d23;
+}
+body.board-media-page .clock-container{
+    text-align: center;
+    font-size: 28px;
+    margin-bottom: 10px;
+    font-weight: 500;
+}
+body.board-media-page .board-wrapper{
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) clamp(320px, 24vw, 430px);
+    gap: 20px;
+    height: calc(100vh - 170px);
+    padding: 20px;
+    box-sizing: border-box;
+    align-items: start;
+}
+body.board-media-page .media-panel{
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    background: transparent;
+    border-radius: 0;
+    box-shadow: none;
+    position: relative;
+}
+body.board-media-page .media-panel video{
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+    background: transparent;
+}
+body.board-media-page .board{
+    width: auto;
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: repeat(7, minmax(85px, 1fr));
+    gap: 10px;
+}
+body.board-media-page .card{
+    background: #ffffff;
+    border-radius: 12px; /* Matching the image's rounded corners */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    transition: all 0.3s ease;
+    padding: 10px;
+}
+body.board-media-page .line{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 30px; /* Space between the Ticket side and Window side */
+    width: 100%;
+}
+body.board-media-page .ticket,
+body.board-media-page .window{
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    line-height: 1.1;
+    font-weight: 800;
+    text-transform: uppercase;
+    /* Adjust these values to change ticket's font size */
+    font-size: 39px; 
+}
+body.board-media-page .ticket span:last-child,
+body.board-media-page .window span:last-child{
+    /* Adjust these values to change ticket's font size */
+    font-size: 39px;
+}
+body.board-media-page .ticket{
+    color: #2d89ef;
+}
+body.board-media-page .window{
+    color: #ff7f50;
+}
+body.board-media-page .arrow{
+    font-size: 40px;
+    color: #666;
+    opacity: 0.8;
+}
+body.board-media-page .status-indicator{
+    position: fixed;
+    bottom: 10px;
+    right: 15px;
+    font-size: 13px;
+    opacity: 0.6;
+}
+
+
+@keyframes call-flash {
+    0% { background: #ffffff; transform: scale(1); }
+    20% { background: #2d89ef; transform: scale(1.05); }
+    40% { background: #ffffff; transform: scale(1); }
+    60% { background: #2d89ef; transform: scale(1.05); }
+    100% { background: #ffffff; transform: scale(1); }
+}
+body.board-media-page .calling{
+    animation: call-flash 1.5s ease-in-out;
+    border: 3px solid #2d89ef;
+    z-index: 10;
+}
+body.board-media-page .line{
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 56px 1fr;
+    align-items: center;
+    column-gap: 18px;
+}
+body.board-media-page .ticket{
+    justify-self: end;
+    text-align: center;
+    white-space: normal;
+}
+body.board-media-page .arrow{
+    justify-self: center;
+    text-align: center;
+    white-space: nowrap;
+    line-height: 1;
+}
+body.board-media-page .window{
+    justify-self: start;
+    text-align: center;
+    white-space: normal;
+}

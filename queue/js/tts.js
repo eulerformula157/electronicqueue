@@ -2,14 +2,10 @@
 
 const TTS_CONFIG = {
     repeatCount: 1,
-
-    // Новый серверный TTS endpoint.
-    // Если фронт и API на одном домене/порту — оставь относительный путь.
+    // Серверный TTS endpoint.
     endpoint: "/tts/audio",
-
     // Пауза между разными вызовами талонов
     pauseBetweenTicketsMs: 1000,
-
     // Запасной таймаут, если событие audio.onended не сработает
     safetyTimeoutMs: 15000
 };

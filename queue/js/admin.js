@@ -1,9 +1,7 @@
 const API = CONFIG.API_URL;
 const GRAFANA = CONFIG.GRAFANA_URL;
-
 // Глобальный WebSocket для админки (используем тот же канал, что и терминалы)
 let adminSocket = null;
-
 
 // Проверка авторизации при загрузке страницы + запуск WebSocket
 async function init() {
@@ -31,10 +29,6 @@ document.addEventListener("DOMContentLoaded", async () => {
             // Если сервер вернул 401 или 403, значит сессия не админская или истекла
             throw new Error("Доступ запрещен");
         }
-        
-        // Если всё хорошо, продолжаем инициализацию страницы
-        //loadOperators(); 
-
         // Подключаем WebSocket после успешной проверки сессии
         initAdminWebSocket();
 
@@ -91,7 +85,6 @@ function resetOpened() {
 
 async function fetchJSON(url, options = {}) {
     const sessionId = sessionStorage.getItem("session_id");
-    
     // Гарантируем, что заголовки существуют
     options.headers = {
         ...options.headers,
@@ -105,7 +98,6 @@ async function fetchJSON(url, options = {}) {
         window.location.href = "login.html";
         return;
     }
-    
     // Если это DELETE и статус 200, res.json() может упасть, если сервер шлет пустой ответ
     if (res.status === 204 || (options.method === 'DELETE' && res.ok)) {
         return { status: "ok" };
@@ -122,26 +114,18 @@ function setForm(html){
 document.getElementById("form").innerHTML=html
 }
 
-////////////////////////////////////////
 //////// УСЛУГИ
-////////////////////////////////////////
-
-
 async function loadServices() {
 	resetOpened();
 	// Показываем форму и таблицу обратно
     document.getElementById("form").style.display = "block";
     document.getElementById("table").style.display = "table";
-    
     // Удаляем блок статистики, чтобы он не мешал
     const statsContainer = document.getElementById("stats-container");
     if (statsContainer) statsContainer.remove();
-	
-	
 	setActiveTab('tab-services'); 
     // 1. Берем ID сессии из хранилища браузера
     const sessionId = sessionStorage.getItem("session_id");
-
     // 2. Делаем запрос с заголовком
     const res = await fetch(`${API}/services`, {
         method: "GET",
@@ -149,13 +133,11 @@ async function loadServices() {
             "session-id": sessionId // Передаем тот самый ID
         }
     });
-
     if (res.status === 401) {
         alert("Сессия истекла, войдите снова");
         window.location.href = "login.html";
         return;
     }
-
     const services = await res.json();
 
   let html = `<tr>
@@ -196,7 +178,6 @@ function editServiceStatus(id, currentStatus) {
     openedServices = null;
     return;
   }
-
   // закрываем любое другое открытое окно
   openedServices?.remove();
   openedServices = null;
@@ -226,7 +207,6 @@ function editServiceStatus(id, currentStatus) {
 async function saveServiceStatus(id) {
   const select = document.getElementById(`serviceStatus-${id}`);
   const newStatus = select.value;
-  
   // Достаем токен, полученный при авторизации админа
   const sessionId = sessionStorage.getItem("session_id");
 
@@ -269,13 +249,11 @@ function editService(id, name) {
     openedServices = null;
     return;
   }
-
   // закрываем любое другое открытое окно
   openedServices?.remove();
   openedServices = null;
 
   let row = document.getElementById(`service-${id}`);
-
   let html = `<tr class="serviceRow" data-service-id="${id}" data-type="service">
     <td></td>
     <td></td>
@@ -298,7 +276,6 @@ async function saveService(id) {
     if (!name) return;
 
     const sessionId = sessionStorage.getItem("session_id"); // Получаем сессию
-
     const res = await fetch(`${API}/services/${id}`, {
         method: "PATCH",
         headers: {
@@ -363,16 +340,12 @@ async function addService() {
     }
 }
 
-////////////////////////////////////////
 //////// ОКНА
-////////////////////////////////////////
-
 async function loadWindows() {
 	resetOpened();
 	// Показываем форму и таблицу обратно
     document.getElementById("form").style.display = "block";
-    document.getElementById("table").style.display = "table";
-    
+    document.getElementById("table").style.display = "table"; 
     // Удаляем блок статистики, чтобы он не мешал
     const statsContainer = document.getElementById("stats-container");
     if (statsContainer) statsContainer.remove();	
@@ -401,9 +374,7 @@ async function loadWindows() {
             </td>
         </tr>`;
     }
-
     setTable(html);
-
     setForm(`
     <div class="form">
         <input id="newWindowName" placeholder="Название окна">
@@ -419,7 +390,6 @@ function editWindowStatus(id, currentStatus) {
     openedServices = null;
     return;
   }
-
   // закрываем любое другое открытое окно/строку статуса
   openedServices?.remove();
   openedServices = null;
@@ -446,16 +416,15 @@ function editWindowStatus(id, currentStatus) {
 
 async function saveWindowStatus(id) {
   let status = document.getElementById(`windowStatusSelect-${id}`).value;
-
   // Заменяем fetch на fetchJSON, который автоматически подставит session-id
   let res = await fetchJSON(`${API}/windows/${id}/status`, {
     method: "PATCH",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({status})
   });
-
+  
   if(!res) return; // fetchJSON сам покажет ошибку, если сессия истекла
-
+  
   openedServices.remove();
   resetOpened();
   loadWindows();
@@ -469,13 +438,11 @@ function editWindow(id, name) {
 		openedServices = null;
 		return;
 	  }
-
 	  // закрываем любое другое открытое окно
 	  openedServices?.remove();
 	  openedServices = null;
 	  
     let row = document.getElementById(`window-${id}`);
-
 	let html = `
 	<tr class="windowEditRow" data-window-id="${id}" data-type="window">
 	  <td></td>
@@ -494,17 +461,14 @@ function editWindow(id, name) {
 async function saveWindow(id) {
     const inputElement = document.getElementById(`windowInput-${id}`);
     if (!inputElement) return;
-
     const name = inputElement.value.trim();
     if (!name) return alert("Введите название окна");
-
     // Используем fetchJSON вместо обычного fetch для автоматической авторизации
     const res = await fetchJSON(`${API}/windows/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name })
     });
-
     // Если res не определен (undefined), значит fetchJSON перенаправил на логин или выдал ошибку
     if (res) {
         // Опционально: можно добавить уведомление об успехе
@@ -520,14 +484,12 @@ async function addWindow() {
     const name = input.value.trim();
     
     if (!name) return alert("Введите название нового окна");
-
     // Используем fetchJSON для автоматической передачи session-id
     const res = await fetchJSON(`${API}/windows/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name })
     });
-
     // Если запрос успешен (res не undefined)
     if (res) {
         input.value = ""; // Очищаем поле ввода
@@ -542,21 +504,17 @@ async function deleteWindow(id) {
         // 1. Загружаем список услуг, привязанных к этому окну
         // Мы делаем запрос к эндпоинту, который возвращает услуги конкретного окна
         const linkedServices = await fetchJSON(`${API}/window-services/${id}`);
-
         // 2. Если массив не пустой, значит услуги есть — прерываем удаление
         if (Array.isArray(linkedServices) && linkedServices.length > 0) {
             alert("Нельзя удалить рабочее место: сначала удалите все услуги, привязанные к этому рабочему месту в меню 'Услуги'!");
             return;
         }
-
         // 3. Если услуг нет, запрашиваем подтверждение
         if (!confirm("Вы уверены, что хотите удалить это рабочее место?")) return;
-
         // 4. Отправляем запрос на удаление
         const res = await fetchJSON(`${API}/windows/${id}`, {
             method: "DELETE"
         });
-
         if (res) {
             alert("Рабочее успешно удалено");
             loadWindows(); // Обновляем таблицу
@@ -573,26 +531,20 @@ let w=windows.find(x=>x.id===id)
 return w?w.name:"-"
 }
 
-////////////////////////////////////////
 //////// ОПЕРАТОРЫ
-////////////////////////////////////////
-
 async function loadOperators(){
 	resetOpened();
 	// Показываем форму и таблицу обратно
     document.getElementById("form").style.display = "block";
     document.getElementById("table").style.display = "table";
-    
     // Удаляем блок статистики, чтобы он не мешал
     const statsContainer = document.getElementById("stats-container");
     if (statsContainer) statsContainer.remove();	
-
 	setActiveTab('tab-operators');
     // fetchJSON сам подставит session-id и выкинет на логин при ошибке 401
     windows = await fetchJSON(`${API}/windows/`);
     operators = await fetchJSON(`${API}/operators/`);
     services = await fetchJSON(`${API}/services/`);
-
     operators.sort((a,b) => a.id - b.id);
 
     let html = `<tr><th>ID</th><th>Имя</th><th>Рабочее место</th><th>Действия</th></tr>`;
@@ -623,10 +575,7 @@ async function loadOperators(){
     `);
 }
 
-////////////////////////////////////////
 //////// имя оператора
-////////////////////////////////////////
-
 function editOperatorName(id,name){
   // если уже открыто для этого оператора — закрываем
   if(openedServices && openedServices.dataset.type === "name" && openedServices.dataset.operatorId == id){
@@ -634,7 +583,6 @@ function editOperatorName(id,name){
     openedServices = null;
     return;
   }
-
   // закрываем любое другое открытое окно
   openedServices?.remove();
   openedServices = null;
@@ -647,7 +595,6 @@ function editOperatorName(id,name){
              '<button onclick="saveOperatorName('+id+')">OK</button></td></tr>';
 
   row.insertAdjacentHTML("afterend", html);
-
   openedServices = row.nextElementSibling;
 }
 
@@ -667,10 +614,7 @@ loadOperators();
 resetOpened();
 }
 
-////////////////////////////////////////
 //////// окно оператора
-////////////////////////////////////////
-
 function editOperatorWindow(id,current){
   if(openedServices && openedServices.dataset.type === "window" && openedServices.dataset.operatorId == id){
     openedServices.remove();
@@ -719,17 +663,12 @@ if(!r.ok){
   alert(err.detail || "Не удалось сохранить рабочее место оператора");
   return;
 }
-
 loadOperators();
 resetOpened();
 }
 
-////////////////////////////////////////
+
 //////// услуги окна
-////////////////////////////////////////
-
-//let openedServices = null;
-
 async function editServices(window_id) {
     if (openedServices && openedServices.dataset.windowId == window_id) {
         openedServices.remove();
@@ -860,10 +799,7 @@ async function saveServices(window_id) {
 	resetOpened();
 }
 
-////////////////////////////////////////
 //////// ДОБАВЛЕНИЕ ОПЕРАТОРА
-////////////////////////////////////////
-
 async function addOperator() {
   const loginInput = document.getElementById("newOperatorLogin");
   const passwordInput = document.getElementById("newOperatorPassword");
@@ -874,7 +810,6 @@ async function addOperator() {
   const name = nameInput.value.trim();
 
   if (!login || !password || !name) return alert("Заполните все поля");
-
   // Используем fetchJSON: он сам добавит header "session-id"
   // и вернет тело ответа (JSON), если статус 200-299.
   // Если случится ошибка (например 400 или 401), fetchJSON сам покажет alert или редиректнет.
@@ -883,7 +818,6 @@ async function addOperator() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ login, password, name, window_id: null })
   });
-
   // Если res определен, значит запрос прошел успешно
   if (res) {
     // Очистка полей
@@ -895,10 +829,8 @@ async function addOperator() {
     loadOperators();
   }
 }
-////////////////////////////////////////
-//////// ОЧЕРЕДЬ
-////////////////////////////////////////
 
+//////// ОЧЕРЕДЬ
 async function loadTickets(){
 
 let tickets=await fetchJSON(`${API}/tickets/`)
@@ -933,11 +865,9 @@ async function editLoginPassword(operator_id) {
         openedServices = null;
         return;
     }
-
     // Закрываем любое другое открытое окно
     openedServices?.remove();
     openedServices = null;
-
     // Получаем данные оператора
     let op = operators.find(o => o.id === operator_id);
     let currentLogin = op.login || "";
@@ -970,7 +900,6 @@ async function saveLoginPassword(operator_id) {
     let password = document.getElementById(`passwordInput-${operator_id}`).value.trim();
 
     if(!login || !password) return alert("Заполните оба поля");
-
     // Извлекаем токен администратора из хранилища
     const sessionId = sessionStorage.getItem("session_id");
 
@@ -999,13 +928,11 @@ async function saveLoginPassword(operator_id) {
     }
 
     alert("Данные входа обновлены");
-    
     // Очистка интерфейса (из вашего исходного кода)
     if (typeof openedServices !== 'undefined' && openedServices) {
         openedServices.remove();
         openedServices = null;
     }
-	
 	resetOpened();
     loadOperators();
 }
@@ -1178,7 +1105,6 @@ async function deleteOperator(id) {
         const res = await fetchJSON(`${API}/operators/${id}`, {
             method: "DELETE"
         });
-
         // Если запрос прошел (res не undefined), обновляем список
         if (res) {
             alert("Оператор удален");
@@ -1192,12 +1118,10 @@ async function deleteOperator(id) {
 
 // основной обработчик закрытия страницы
 window.addEventListener("beforeunload", function () {
-
     // если это обновление страницы — ничего не делаем
     if (isClosingTab || sessionStorage.getItem("refresh")) {
         return;
     }
-
     // если вкладку закрывают
     if (sessionId) {
 		
@@ -1227,7 +1151,6 @@ async function ExitPage() {
 }
 
 /// MEDIA FILES 
-
 // In admin.js
 async function loadMedia() {
 	resetOpened();
@@ -1236,8 +1159,6 @@ async function loadMedia() {
     document.getElementById("table").style.display = "table";
  
     setActiveTab('tab-media');
-
-	
     // Удаляем блок статистики, чтобы он не мешал
     const statsContainer = document.getElementById("stats-container");
     if (statsContainer) statsContainer.remove();	
@@ -1249,8 +1170,7 @@ async function loadMedia() {
         const response = await fetch(`${API}/admin/media/files`, {
             headers: { "session-id": sessionId }
         });
-        const data = await response.json();
-        
+        const data = await response.json();    
         // Ensure we are working with arrays
         const files = data.files || [];
         const playlist = data.playlist || [];

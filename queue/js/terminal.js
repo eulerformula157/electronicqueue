@@ -24,19 +24,16 @@ async function performTerminalLogin(login, password, isAuto = false) {
 
         const data = await response.json();
 
-        // Важно: проверяем, что это именно терминал!
+        // Проверяем, что это именно терминал
         if (response.ok && data.role === "terminal") {
             // Сохраняем сессию для текущей работы
-            localStorage.setItem("session_id", data.session_id);
-            
+            localStorage.setItem("session_id", data.session_id);          
             // Сохраняем логин/пароль "навечно" для авто-входа
             localStorage.setItem("terminal_credential_login", login);
-            localStorage.setItem("terminal_credential_pass", password);
-            
+            localStorage.setItem("terminal_credential_pass", password);          
             // Скрываем окно и загружаем данные терминала
-            document.getElementById("terminal-auth-overlay").style.display = "none";
-            
-            // Твои стандартные функции инициализации
+            document.getElementById("terminal-auth-overlay").style.display = "none" 
+            // Стандартные функции инициализации
             loadServices();
             loadTerminalSettings();
         } else {
@@ -69,9 +66,7 @@ async function handleTerminalManualLogin() {
 function connectSocket() {
     // Используем URL из конфига
     const socket = new WebSocket(CONFIG.WS_TERMINAL_URL);
-
     socket.onopen = () => console.log("WS connected");
-
     socket.onclose = () => {
         console.log("WS reconnecting...");
         // Используем интервал из конфига
@@ -178,7 +173,6 @@ async function loadServices() {
 async function createTicket(serviceId, serviceName) {
     const buttons = document.querySelectorAll(".service-btn");
     buttons.forEach(btn => btn.disabled = true);
-
     // Достаем токен сессии
 	const currentSession = localStorage.getItem("session_id");
 
@@ -199,7 +193,6 @@ async function createTicket(serviceId, serviceName) {
         });
 
         const data = await response.json();
-
         // Обработка ошибок 
         if (!response.ok) {
             if (response.status === 401) {
@@ -211,7 +204,6 @@ async function createTicket(serviceId, serviceName) {
             showNotice(errorMsg, 3);
             return; 
         }
-
         // Настройка форматирования даты
         const dateOptions = { 
             weekday: 'long', 
@@ -224,7 +216,6 @@ async function createTicket(serviceId, serviceName) {
         };
 
         const formattedDate = new Date().toLocaleString('ru-RU', dateOptions).replace(' г.', 'г.');
-
         // Заполнение данными для печати
         document.getElementById("receipt-number").textContent = data.number;
         document.getElementById("receipt-service").textContent = data.service_name || serviceName;
@@ -236,17 +227,14 @@ async function createTicket(serviceId, serviceName) {
                 ? `ПЕРЕД ВАМИ В ОЧЕРЕДИ: ~ ${data.waiting_before} ЧЕЛ.` 
                 : "ВЫ СЛЕДУЮЩИЙ В ОЧЕРЕДИ!";
         }
-
         // Печать, если включена в админке
         if (terminalSettings.print_ticket) {
             printTicket();
-        }
-        
+        }      
         // Уведомляем другие модули через сокет
         if (socket.readyState === WebSocket.OPEN) {
             socket.send(JSON.stringify({ type: "queue_updated" }));
         }
-
         showNotice(`Ваш номер: ${data.number}`, CONFIG.NOTICE_DURATION);
 
     } catch (error) {
@@ -266,7 +254,6 @@ function showNotice(message, duration) {
     const notice = document.getElementById("ticket-notice");
     const timerEl = document.getElementById("ticket-timer");
     const messageEl = document.getElementById("ticket-message");
-
     // Останавливаем предыдущие таймеры, если они были
     if (window.noticeInterval) clearInterval(window.noticeInterval);
 
@@ -289,18 +276,14 @@ function showNotice(message, duration) {
 
 // Оставляем только ОДНУ функцию printTicket
 function printTicket() {
-    const receipt = document.getElementById("print-receipt");
-    
+    const receipt = document.getElementById("print-receipt");  
     // Делаем видимым для корректного захвата браузером
     receipt.style.display = "block";
-
     // Вызов системного диалога печати
     window.print();
-
     // Скрываем обратно
     receipt.style.display = "none";
 }
-
 
 // Запуск "тишины" для предотвращения сна
 function startAntiSleepAudio() {
@@ -319,7 +302,7 @@ document.addEventListener('click', () => {
     startAntiSleepAudio();
 }, { once: true });
 
-
+// Клавиатура активации //
 let vkbActiveField = 'term-login';
 let vkbShift = false;
 let vkbCaps = false;
@@ -529,7 +512,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
-
 
 // --- Инициализация ---
 loadTerminalSettings();

@@ -1,6 +1,5 @@
 let sessionId = sessionStorage.getItem("session_id")
 let operatorId = null; // Вынесено в глобальную область видимости
-
 const panel = document.getElementById("queue-list");
 
 // Глобальный WebSocket оператора (терминальный канал)
@@ -18,7 +17,6 @@ async function init() {
         const res = await fetch(`${CONFIG.API_URL}/auth/me`, {
             headers: { "session-id": sessionToken } 
         });
-
         if (!res.ok) {
             window.location.href = "/queue/login.html";
             return;
@@ -26,12 +24,7 @@ async function init() {
 
         const data = await res.json();
         operatorId = data.operator_id; 
-
-        //initWebSocket();
-
         loadOperatorInfo();
-        //loadQueue();
-        //loadAllServices();
 
     } catch (e) {
         console.error(e);
@@ -43,11 +36,9 @@ async function init() {
 
 function initWebSocket() {
     operatorSocket = new WebSocket(CONFIG.WS_TERMINAL_URL);
-
     operatorSocket.onopen = () => {
         console.log("WebSocket подключен");
         // Сразу отправляем heartbeat, чтобы сервер мог связать session_id с WS
-        // (даже если setInterval начнет работать с задержкой при background вкладке).
         try {
             const sid = sessionStorage.getItem("session_id");
             if (sid) {
@@ -60,7 +51,6 @@ function initWebSocket() {
 
     operatorSocket.onmessage = function(event) {
         const data = JSON.parse(event.data);
-
         if (data.type === "session_expired") {
             alert(data.message);
             sessionStorage.clear();
@@ -76,7 +66,6 @@ function initWebSocket() {
             loadQueue();
         }
     };
-
     operatorSocket.onclose = () => {
         console.log("WebSocket отключен, переподключение...");
         setTimeout(initWebSocket, CONFIG.RECONNECT_INTERVAL || 2000);
@@ -106,10 +95,8 @@ setInterval(() => {
 }, 5000);
 
 // ==================== Основная логика ====================
-
 let currentTicketId = null;
 let allServices = [];
-
 
 /* =========================
    Загрузка информации об операторе
@@ -203,7 +190,6 @@ async function callNext() {
         showToast("Закончите с текущим клиентом!", "danger");
         return;
     }
-
     try {
         const res = await fetch(`${CONFIG.API_URL}/tickets/next`, {
             method: "POST",
@@ -215,7 +201,6 @@ async function callNext() {
         });
 
         const ticket = await res.json();
-
         if (res.ok && ticket.id) {
             // Обновляем текущий билет и услугу
             currentTicketId = ticket.id;
@@ -241,7 +226,6 @@ async function callNext() {
 function showToast(message, type = "danger") {
     const toast = document.getElementById("toast-notification");
     toast.textContent = message;
-    
     // Меняем цвет в зависимости от ситуации
     if (type === "warning") {
         toast.style.background = "var(--warning)"; // Оранжевый для "Очередь пуста"
@@ -249,11 +233,9 @@ function showToast(message, type = "danger") {
         toast.style.background = "var(--danger)";  // Красный для ошибок работы
     }
     
-    toast.style.display = "block";
-    
+    toast.style.display = "block";  
     // Очищаем предыдущий таймер, если он был, чтобы уведомление не мерцало
-    if (window.toastTimer) clearTimeout(window.toastTimer);
-    
+    if (window.toastTimer) clearTimeout(window.toastTimer);    
     window.toastTimer = setTimeout(() => {
         toast.style.display = "none";
     }, 3000);
@@ -276,7 +258,6 @@ async function finishCurrent() {
 
         if (res.ok) {
             currentTicketId = null; 
-            
             document.getElementById("current").textContent = "Рабочее место свободно";
             // Также скрываем уведомление, если оно висело
             document.getElementById("toast-notification").style.display = "none";
@@ -292,7 +273,6 @@ async function finishCurrent() {
         }
 
         loadQueue(); 
-
     } catch (e) {
         console.error(e);
         alert("Ошибка при завершении обслуживания");
@@ -446,7 +426,6 @@ function updateStatusButtons(status) {
     const stopBtn = document.getElementById("btn-stop");
     const statusText = document.getElementById("status-text");
     const statusDot = document.getElementById("status-dot");
-
     // Базовый сброс для всех состояний
     startBtn.classList.remove("status-active");
     stopBtn.classList.remove("btn-warning-active");
@@ -470,7 +449,6 @@ function updateStatusButtons(status) {
         statusText.style.color = "var(--warning)";
         return;
     }
-
     // offline / неизвестный статус
     statusText.textContent = "Оффлайн";
     statusText.style.color = "var(--text-muted)";
@@ -487,7 +465,6 @@ async function loadCurrentTicket() {
         if (data.ticket) {
             currentTicketId = data.ticket.id;
             document.getElementById("current").textContent = data.ticket.number;
-
             // Ищем название услуги по service_id
             const service = allServices.find(s => s.id === data.ticket.service_id);
             document.getElementById("current-service").textContent =
@@ -547,15 +524,10 @@ window.addEventListener("keydown", function (event) {
     }
 });
 
-window.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") {
-        // возможный reload / закрытие
-    }
-});
-
 window.addEventListener("load", () => {
     sessionStorage.removeItem("isReload");
 });
+
 document.querySelectorAll('a').forEach(link => {
     link.addEventListener('click', () => isNavigating = true);
 });
@@ -647,10 +619,8 @@ async function cancelCurrent() {
                 currentElement.textContent = "Рабочее место свободно";
 				document.getElementById("current-service").textContent = "";
             }
-            
             // Сбрасываем ID текущего билета, так как его больше нет
             currentTicketId = null; 
-
             loadQueue(); 
             if (typeof updateStatus === "function") updateStatus(); 
             
@@ -684,7 +654,6 @@ function stopAutoCall() {
 
 function runAutoCallLogic() {
     stopAutoCall(); // Чистим всё перед запуском, чтобы не было дублей
-
     autoCallTimer = setInterval(async () => {
         const toggle = document.getElementById('auto-call-toggle');
         const statusDisplay = document.getElementById("auto-call-status");
@@ -739,8 +708,7 @@ function runAutoCallLogic() {
 const autoCallToggle = document.getElementById('auto-call-toggle');
 
 if (autoCallToggle) {
-    const savedStatus = localStorage.getItem('autoCallActive');
-    
+    const savedStatus = localStorage.getItem('autoCallActive');   
     // Прямая проверка: запускаем только если в базе четко 'true'
     if (savedStatus === 'true') {
         autoCallToggle.checked = true;
@@ -749,7 +717,6 @@ if (autoCallToggle) {
         autoCallToggle.checked = false;
         stopAutoCall();
     }
-
     autoCallToggle.addEventListener('change', function(e) {
         if (e.target.checked) {
             localStorage.setItem('autoCallActive', 'true');
@@ -826,6 +793,3 @@ window.addEventListener("unload", () => {
 
     navigator.sendBeacon(`${CONFIG.API_URL}/logout`, data);
 });
-
-// HTTP /ping через Web Worker больше не используется:
-// last_seen обновляется через WebSocket heartbeat выше.
