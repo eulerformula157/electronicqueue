@@ -10,3 +10,6 @@ queue_project.md
 
 PostgreSQL/
 __pycache__
+queue/tts/cache/
+queue/media/playlist.json
+queue/media/

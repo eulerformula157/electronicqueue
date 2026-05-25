@@ -1,4 +1,4 @@
-const PAGE_SIZE = window.BOARD_CONFIG?.pageSize || 10;
+const PAGE_SIZE = (window.BOARD_CONFIG && window.BOARD_CONFIG.pageSize) || 10;
 const processedTickets = new Map();
 const processedCallIds = new Set();
 let highlightTickets = new Set(); 

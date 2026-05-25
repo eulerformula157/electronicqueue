@@ -50,14 +50,14 @@ async function processTTSQueue() {
 }
 
 function buildTicketText(ticket) {
-    if (ticket?.tts_text) {
+    if (ticket && ticket.tts_text) {
         return ticket.tts_text;
     }
 
-    const number = ticket?.number ?? "";
-    const windowName = ticket?.window_name ?? "";
+    const number = ticket && ticket.number ? ticket.number : "";
+    const windowName = ticket && ticket.window_name ? ticket.window_name : "";
 
-    return `Талон ${number}. Подойдите к окну ${windowName}.`;
+    return "Талон " + number + ". Подойдите к окну " + windowName + ".";
 }
 
 function speakOnce(text, ticketId, onStateChange) {
