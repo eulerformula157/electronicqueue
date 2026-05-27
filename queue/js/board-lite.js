@@ -1,18 +1,21 @@
-/* board-lite.js — легковесное табло для LG/WebOS.
-   Использует существующий media.js для видео.
-   Без async/await, стрелок, optional chaining, replaceAll, Set/Map. */
+/* board-lite.js — ультра-легковесное табло для старых ТВ (Chromium 79 / WebOS).
+   Только вывод билетов на экран. Без аудио, без анимаций.
+   Без async/await, стрелок-функций, optional chaining, replaceAll, Set/Map. */
+
 (function () {
-    var PAGE_SIZE = 7;
+    var PAGE_SIZE = (window.BOARD_CONFIG && window.BOARD_CONFIG.pageSize) || 9;
+    var PAGE_INTERVAL_MS = (window.BOARD_CONFIG && window.BOARD_CONFIG.pageIntervalMs) || 5000;
     var RECONNECT_MS = 3000;
     var CLEAN_PROCESSED_MS = 5 * 60 * 1000;
-    var HIGHLIGHT_MS = 9000;
 
     var ws = null;
     var previousTickets = [];
     var initialized = false;
     var processedIds = {};
-    var activeHighlightId = "";
-    var highlightTimer = null;
+
+    var currentPage = 0;
+    var pages = [];
+    var pageTimer = null;
 
     function byId(id) {
         return document.getElementById(id);
@@ -74,11 +77,16 @@
     function findTicketByNumber(number) {
         var i;
         var n = toStr(number);
+
         for (i = 0; i < previousTickets.length; i++) {
-            if (getTicketNumber(previousTickets[i]) === n || toStr(previousTickets[i].ticket_number) === n) {
+            if (
+                getTicketNumber(previousTickets[i]) === n ||
+                toStr(previousTickets[i].ticket_number) === n
+            ) {
                 return previousTickets[i];
             }
         }
+
         return null;
     }
 
@@ -99,11 +107,13 @@
                 month: "long",
                 day: "numeric"
             });
+
             timeString = now.toLocaleTimeString("ru-RU", {
                 hour: "2-digit",
                 minute: "2-digit",
                 second: "2-digit"
             });
+
             dateString = dateString.charAt(0).toUpperCase() + dateString.slice(1);
             el.innerHTML = escapeHtml(dateString + " " + timeString);
         } catch (e) {
@@ -111,105 +121,135 @@
         }
     }
 
-    function renderBoard(tickets) {
+    function updateTitle() {
+        var title = byId("title");
+
+        if (!title) return;
+
+        if (pages.length > 1) {
+            title.innerHTML =
+                "Табло очереди Приемной комиссии (" +
+                (currentPage + 1) +
+                "/" +
+                pages.length +
+                ")";
+        } else {
+            title.innerHTML = "Табло очереди Приемной комиссии";
+        }
+    }
+
+    function buildPages(tickets) {
+        var result = [];
+        var i;
+
+        if (!tickets || !tickets.length) {
+            return result;
+        }
+
+        for (i = 0; i < tickets.length; i += PAGE_SIZE) {
+            result.push(tickets.slice(i, i + PAGE_SIZE));
+        }
+
+        return result;
+    }
+
+    function renderPage() {
         var board = byId("board");
         var html = "";
-        var max;
+        var currentTickets;
         var i;
         var t;
         var id;
         var number;
         var windowName;
-        var cls;
 
         if (!board) return;
 
-        if (!tickets || !tickets.length) {
+        currentTickets = pages[currentPage] || [];
+
+        if (!currentTickets.length) {
             board.innerHTML = "";
+            updateTitle();
             return;
         }
 
-        max = tickets.length;
-        if (max > PAGE_SIZE) max = PAGE_SIZE;
-
-        for (i = 0; i < max; i++) {
-            t = normalizeTicket(tickets[i]);
+        for (i = 0; i < currentTickets.length; i++) {
+            t = normalizeTicket(currentTickets[i]);
             id = getTicketId(t);
             number = getTicketNumber(t);
             windowName = getWindowName(t);
-            cls = "card";
-            if (id && activeHighlightId && id === activeHighlightId) {
-                cls += " calling";
-            }
 
-            html += ''
-                + '<div class="' + cls + '" data-ticket-id="' + escapeHtml(id) + '">'
+            html += ""
+                + '<div class="card" data-ticket-id="' + escapeHtml(id) + '">'
                 + '  <div class="line">'
-                + '    <div class="ticket"><span>ТАЛОН</span><span>' + escapeHtml(number) + '</span></div>'
+                + '    <div class="ticket"><span></span><span>' + escapeHtml(number) + '</span></div>'
                 + '    <div class="arrow">→</div>'
-                + '    <div class="window"><span>ОКНО</span><span>' + escapeHtml(windowName) + '</span></div>'
+                + '    <div class="window"><span></span><span>' + escapeHtml(windowName) + '</span></div>'
                 + '  </div>'
                 + '</div>';
         }
 
         board.innerHTML = html;
+        updateTitle();
     }
 
-    function setVideoVolume(value) {
-        var video = byId("media-video");
-        if (!video) return;
-        try { video.volume = value; } catch (e) {}
-    }
-
-    function startHighlight(ticketId) {
-        activeHighlightId = toStr(ticketId);
-
-        if (highlightTimer) {
-            clearTimeout(highlightTimer);
-            highlightTimer = null;
+    function startPageTimer() {
+        if (pageTimer) {
+            clearInterval(pageTimer);
+            pageTimer = null;
         }
 
-        renderBoard(previousTickets);
+        if (pages.length > 1) {
+            pageTimer = setInterval(function () {
+                currentPage = currentPage + 1;
 
-        highlightTimer = setTimeout(function () {
-            activeHighlightId = "";
-            renderBoard(previousTickets);
-        }, HIGHLIGHT_MS);
+                if (currentPage >= pages.length) {
+                    currentPage = 0;
+                }
+
+                renderPage();
+            }, PAGE_INTERVAL_MS);
+        }
     }
 
-    function stopHighlight(ticketId) {
-        if (toStr(ticketId) === activeHighlightId) {
-            activeHighlightId = "";
-            renderBoard(previousTickets);
+    function renderBoard(tickets) {
+        pages = buildPages(tickets);
+
+        if (currentPage >= pages.length) {
+            currentPage = 0;
         }
+
+        renderPage();
+        startPageTimer();
     }
 
     function announceTicket(ticket) {
         var normalized = normalizeTicket(ticket);
         var id = getTicketId(normalized);
+        var i;
+        var found = false;
 
         if (!id) return;
 
+        /* Защита от дубликатов в рамках одной сессии */
         if (processedIds[id]) {
             return;
         }
 
         processedIds[id] = new Date().getTime();
 
-        if (window.speakTicketLite) {
-            window.speakTicketLite(normalized, function (ticketId, isActive) {
-                if (isActive) {
-                    setVideoVolume(0.2);
-                    startHighlight(ticketId);
-                } else {
-                    stopHighlight(ticketId);
-                    setTimeout(function () {
-                        setVideoVolume(1.0);
-                    }, 6000);
-                }
-            });
-        } else {
-            startHighlight(id);
+        /* Добавляем талон в начало массива, если его там еще нет */
+        for (i = 0; i < previousTickets.length; i++) {
+            if (getTicketId(previousTickets[i]) === id) {
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            previousTickets.unshift(normalized);
+            currentPage = 0;
+            renderBoard(previousTickets);
         }
     }
 
@@ -253,9 +293,12 @@
 
     function handleTicketsList(tickets) {
         var normalized = mergeIncomingTickets(tickets);
+
         detectAndAnnounceNewTickets(normalized);
+
         previousTickets = normalized;
         initialized = true;
+
         renderBoard(previousTickets);
     }
 
@@ -265,6 +308,7 @@
         var realId;
 
         realId = data.ticket_id || data.id || "";
+
         if (!realId) {
             existing = findTicketByNumber(data.ticket_number || data.number);
             if (existing) realId = getTicketId(existing);
@@ -280,10 +324,6 @@
         });
 
         announceTicket(ticket);
-
-        if (previousTickets.length) {
-            renderBoard(previousTickets);
-        }
     }
 
     function handleMessage(event) {
@@ -299,10 +339,14 @@
             try {
                 if (window.initPlaylist) window.initPlaylist(true);
             } catch (e2) {}
+
             return;
         }
 
-        if (data.tickets && Object.prototype.toString.call(data.tickets) === "[object Array]") {
+        if (
+            data.tickets &&
+            Object.prototype.toString.call(data.tickets) === "[object Array]"
+        ) {
             handleTicketsList(data.tickets);
             return;
         }
@@ -312,7 +356,13 @@
             return;
         }
 
-        if (data.type === "recall_ticket" || data.type === "call_ticket" || data.type === "ticket_called" || data.ticket_number || data.number) {
+        if (
+            data.type === "recall_ticket" ||
+            data.type === "call_ticket" ||
+            data.type === "ticket_called" ||
+            data.ticket_number ||
+            data.number
+        ) {
             handleRecall(data);
             return;
         }
@@ -346,12 +396,23 @@
     function init() {
         updateClock();
         setInterval(updateClock, 1000);
+
         renderBoard([]);
         connectWS();
 
+        /* Чистка истории раз в минуту */
         setInterval(function () {
-            processedIds = {};
-        }, CLEAN_PROCESSED_MS);
+            var now = new Date().getTime();
+            var key;
+
+            for (key in processedIds) {
+                if (processedIds.hasOwnProperty(key)) {
+                    if (now - processedIds[key] > CLEAN_PROCESSED_MS) {
+                        delete processedIds[key];
+                    }
+                }
+            }
+        }, 60000);
     }
 
     if (document.readyState === "loading") {

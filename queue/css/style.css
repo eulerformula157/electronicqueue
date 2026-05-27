@@ -1276,3 +1276,167 @@ body.board-media-page .window{
     text-align: center;
     white-space: normal;
 }
+/* ================================
+   LG LITE tuning
+   ================================ */
+
+body.board-media-page.lite-version {
+    --board-width: 220px;   /* ширина правой панели */
+    --gap: 16px;            /* расстояние между видео и панелью */
+    --side-padding: 24px;   /* отступы слева/справа: больше = видео чуть меньше по ширине */
+    --top-offset: 135px;    /* больше = видео ниже/меньше по высоте */
+}
+
+/* Заголовок */
+body.board-media-page.lite-version #title {
+    margin: 18px 0 10px 0 !important;
+    font-size: 30px !important;
+    line-height: 1.1 !important;
+    text-align: center !important;
+}
+
+/* Часы */
+body.board-media-page.lite-version .clock-container {
+    margin: 0 0 22px 0 !important;
+    font-size: 26px !important;
+    line-height: 1.1 !important;
+    text-align: center !important;
+}
+
+/* Главная сетка: видео + табло */
+body.board-media-page.lite-version .board-wrapper {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) var(--board-width) !important;
+    gap: var(--gap) !important;
+
+    width: 100vw !important;
+    height: calc(100vh - var(--top-offset)) !important;
+
+    padding: 0 var(--side-padding) !important;
+    box-sizing: border-box !important;
+
+    align-items: start !important;
+}
+
+/* Видео-блок */
+body.board-media-page.lite-version .media-panel {
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+}
+
+/* Само видео */
+body.board-media-page.lite-version #media-video {
+    width: 100% !important;
+    height: 100% !important;
+
+    /* contain — видно всё видео, могут быть пустые поля */
+    /* cover — видео заполняет весь блок, но может обрезать края */
+    object-fit: contain !important;
+
+    display: block !important;
+}
+
+/* Правая панель */
+body.board-media-page.lite-version .board {
+    width: var(--board-width) !important;
+    min-width: var(--board-width) !important;
+    max-width: var(--board-width) !important;
+
+    height: auto !important;
+    padding: 8px 0 0 0 !important;
+    box-sizing: border-box !important;
+
+    overflow: hidden !important;
+}
+
+/* Карточка */
+body.board-media-page.lite-version #board .card {
+    width: 100% !important;
+
+    height: 86px !important;
+    min-height: 86px !important;
+
+    margin: 0 0 8px 0 !important;
+    padding: 0 10px !important;
+
+    box-sizing: border-box !important;
+
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+/* Строка внутри карточки */
+body.board-media-page.lite-version #board .card .line {
+    display: flex !important;
+    flex-direction: row !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+
+    width: 100% !important;
+    height: 100% !important;
+
+    box-sizing: border-box !important;
+}
+
+/* Талон и окно */
+body.board-media-page.lite-version #board .ticket,
+body.board-media-page.lite-version #board .window {
+    display: flex !important;
+    flex-direction: column !important;
+
+    align-items: center !important;
+    justify-content: center !important;
+
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+    height: 100% !important;
+
+    box-sizing: border-box !important;
+}
+
+/* Span */
+body.board-media-page.lite-version #board .ticket span,
+body.board-media-page.lite-version #board .window span {
+    display: block !important;
+    text-align: center !important;
+    white-space: nowrap !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    box-sizing: border-box !important;
+}
+
+/* Подписи ТАЛОН / ОКНО */
+body.board-media-page.lite-version #board .ticket span:first-child,
+body.board-media-page.lite-version #board .window span:first-child {
+    font-size: 12px !important;
+    line-height: 1.1 !important;
+    margin-bottom: 4px !important;
+}
+
+/* Номера */
+body.board-media-page.lite-version #board .ticket span:last-child,
+body.board-media-page.lite-version #board .window span:last-child {
+    font-size: 36px !important;
+    line-height: 1 !important;
+    font-weight: 700 !important;
+}
+
+/* Стрелка */
+body.board-media-page.lite-version #board .arrow {
+    font-size: 32px !important;
+    line-height: 1 !important;
+
+    padding: 0 5px !important;
+    margin: 0 !important;
+
+    flex: 0 0 auto !important;
+
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}

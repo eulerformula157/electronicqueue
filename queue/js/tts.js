@@ -63,67 +63,59 @@ function buildTicketText(ticket) {
 function speakOnce(text, ticketId, onStateChange) {
     return new Promise((resolve) => {
         let finished = false;
-        let objectUrl = null;
         let safetyTimer = null;
+        let audioSource = null;
+        
+        // Создаем или используем существующий AudioContext
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const ctx = new AudioContext();
 
         const done = () => {
             if (finished) return;
-
             finished = true;
             isSpeakingNow = false;
 
-            if (safetyTimer) {
-                clearTimeout(safetyTimer);
-            }
+            if (safetyTimer) clearTimeout(safetyTimer);
 
-            if (currentAudio) {
-                currentAudio.pause();
-                currentAudio.src = "";
-                currentAudio.load();
-                currentAudio = null;
+            if (audioSource) {
+                try { audioSource.stop(); } catch(e) {}
             }
-
-            if (objectUrl) {
-                URL.revokeObjectURL(objectUrl);
-            }
+            try { ctx.close(); } catch(e) {}
 
             if (typeof onStateChange === "function") {
                 onStateChange(ticketId, false);
             }
-
             resolve();
-        };
-
-        const startHighlight = () => {
-            isSpeakingNow = true;
-
-            if (typeof onStateChange === "function") {
-                onStateChange(ticketId, true);
-            }
         };
 
         fetchTtsAudio(text)
             .then((audioBlob) => {
-                objectUrl = URL.createObjectURL(audioBlob);
+                if (finished) return;
+                return audioBlob.arrayBuffer(); // Читаем как сырые байты
+            })
+            .then((arrayBuffer) => {
+                if (finished) return;
+                // Декодируем аудио-данные (wav, mp3 и т.д.) напрямую в буфер
+                return ctx.decodeAudioData(arrayBuffer);
+            })
+            .then((audioBuffer) => {
+                if (finished) return;
 
-                const audio = new Audio(objectUrl);
-                currentAudio = audio;
+                audioSource = ctx.createBufferSource();
+                audioSource.buffer = audioBuffer;
+                audioSource.connect(ctx.destination);
 
-                audio.preload = "auto";
+                // Аналог onplay
+                isSpeakingNow = true;
+                if (typeof onStateChange === "function") onStateChange(ticketId, true);
 
-                audio.onplay = startHighlight;
-                audio.onended = done;
-                audio.onerror = (e) => {
-                    console.error("Audio playback error:", e);
-                    done();
-                };
-
+                audioSource.onended = done;
                 safetyTimer = setTimeout(done, TTS_CONFIG.safetyTimeoutMs);
 
-                return audio.play();
+                audioSource.start(0);
             })
             .catch((e) => {
-                console.error("TTS fetch/play error:", e);
+                console.error("Критическая ошибка Web Audio API:", e);
                 done();
             });
     });
