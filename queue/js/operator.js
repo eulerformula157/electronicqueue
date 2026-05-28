@@ -5,6 +5,12 @@ const panel = document.getElementById("queue-list");
 // Глобальный WebSocket оператора (терминальный канал)
 let operatorSocket = null;
 
+// Polling — резервное обновление очереди и текущего клиента.
+// WebSocket остается основным каналом быстрых событий, а polling страхует окна,
+// где события по WS по какой-то причине не доходят.
+let operatorPollingTimer = null;
+let operatorPollingInProgress = false;
+
 async function init() {
     const sessionToken = sessionStorage.getItem("session_id");
     if (!sessionToken) {
@@ -72,11 +78,37 @@ function initWebSocket() {
     };
 }
 
+function startOperatorPolling() {
+    if (operatorPollingTimer) return;
+
+    const interval = CONFIG.OPERATOR_POLL_INTERVAL_MS || 7000;
+
+    operatorPollingTimer = setInterval(async () => {
+        const sid = sessionStorage.getItem("session_id");
+        if (!sid) return;
+
+        if (operatorPollingInProgress) return;
+        operatorPollingInProgress = true;
+
+        try {
+            await Promise.all([
+                loadQueue(),
+                loadCurrentTicket()
+            ]);
+        } catch (e) {
+            console.debug("Operator polling error:", e);
+        } finally {
+            operatorPollingInProgress = false;
+        }
+    }, interval);
+}
+
 // Запускаем инициализацию
 init();
 initWebSocket();
 loadQueue();
 loadAllServices();
+startOperatorPolling();
 
 // ------------------- WebSocket heartbeat вместо HTTP /ping -------------------
 setInterval(() => {
@@ -221,6 +253,7 @@ async function callNext() {
     }
 
     loadQueue();
+	loadCurrentTicket();
 }
 
 function showToast(message, type = "danger") {
