@@ -1281,9 +1281,9 @@ body.board-media-page .window{
    ================================ */
 
 body.board-media-page.lite-version {
-    --board-width: 220px;   /* ширина правой панели */
+    --board-width: 250px;   /* ширина правой панели */
     --gap: 16px;            /* расстояние между видео и панелью */
-    --side-padding: 24px;   /* отступы слева/справа: больше = видео чуть меньше по ширине */
+    --side-padding: 22px;   /* отступы слева/справа: больше = видео чуть меньше по ширине */
     --top-offset: 135px;    /* больше = видео ниже/меньше по высоте */
 }
 
@@ -1439,4 +1439,65 @@ body.board-media-page.lite-version #board .arrow {
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
+}
+
+/* Колонка правого табло: карточки остаются на старом месте */
+body.board-media-page.lite-version .board-column {
+    width: var(--board-width) !important;
+    min-width: var(--board-width) !important;
+    max-width: var(--board-width) !important;
+
+    position: relative !important;
+    box-sizing: border-box !important;
+    margin-top: 18px !important; /* двигает билет вниз */
+}
+
+/* Заголовок поверх панели, не занимает место в потоке */
+body.board-media-page.lite-version .board-header {
+    position: absolute !important;
+    left: 0 !important;
+    top: -26px !important;
+
+    width: 100% !important;
+    height: 20px !important;
+
+    display: grid !important;
+    grid-template-columns: 0.8fr 34px 1fr !important;
+    align-items: center !important;
+
+    padding: 0 10px !important;
+    box-sizing: border-box !important;
+
+    font-size: 24px !important;
+    line-height: 1 !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+
+    pointer-events: none !important;
+}
+
+/* БИЛЕТ над левой частью карточки */
+body.board-media-page.lite-version .board-header span:first-child {
+    grid-column: 1 !important;
+    justify-self: center !important;
+    color: #2d89ef !important;
+}
+
+/* ОПЕРАТОР над правой частью карточки */
+body.board-media-page.lite-version .board-header span:last-child {
+    grid-column: 3 !important;
+    justify-self: center !important;
+    color: #ff7f50 !important;
+}
+
+/* Возвращаем карточки на прежнюю высоту/позицию */
+body.board-media-page.lite-version .board-column .board {
+    padding: 2px 0 0 0 !important;
+}
+
+@media print {
+    body::after {
+      display: none !important;
+      content: none !important;
+    }
 }
