@@ -1501,3 +1501,54 @@ body.board-media-page.lite-version .board-column .board {
       content: none !important;
     }
 }
+/* Redirected tickets in operator queue */
+body.operator-page .queue-item {
+    position: relative;
+}
+
+body.operator-page .queue-item-redirected {
+    border-left: 5px solid var(--primary);
+}
+
+body.operator-page .redirect-badge {
+    position: absolute;
+    right: 12px;
+    bottom: 10px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #fff;
+    background: var(--primary);
+    padding: 4px 8px;
+    border-radius: 999px;
+}
+
+body.operator-page .redirect-to-window-panel {
+    background: #f8f9fc;
+    padding: 15px;
+    border-radius: 12px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+body.operator-page .redirect-to-window-panel select {
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid #ddd;
+    width: min(720px, 100%);
+    max-width: 720px;
+    min-width: 260px;
+    box-sizing: border-box;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+
+body.operator-page .redirect-to-window-panel option:disabled,
+body.operator-page .redirect-to-window-panel .window-option-disabled {
+    color: #9ca3af;
+    background: #f3f4f6;
+}

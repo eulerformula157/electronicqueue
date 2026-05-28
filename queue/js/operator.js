@@ -129,6 +129,7 @@ setInterval(() => {
 // ==================== Основная логика ====================
 let currentTicketId = null;
 let allServices = [];
+let allWindows = [];
 
 /* =========================
    Загрузка информации об операторе
@@ -193,15 +194,19 @@ async function loadQueue() {
         if (!tickets.length) {
             panel.innerHTML = "<div style='color:var(--text-muted); padding:20px;'>Нет ожидающих</div>";
         } else {
-            panel.innerHTML = tickets.map(t => `
-                <div class="queue-item">
+            panel.innerHTML = tickets.map(t => {
+                const redirected = Boolean(t.is_redirected_to_window || t.target_window_id);
+                return `
+                <div class="queue-item ${redirected ? 'queue-item-redirected' : ''}">
                     <div style="display:flex; justify-content:space-between; align-items:baseline; width:100%;">
                         <span>№ ${t.number}</span>
                         <span style="font-size:0.8rem; font-weight:500; color:var(--text-muted); margin-left:8px;">${t.created_at}</span>
                     </div>
                     <div class="queue-service-name">${t.service_name || 'Услуга не указана'}</div>
+                    ${redirected ? '<div class="redirect-badge">Перенаправлено</div>' : ''}
                 </div>
-            `).join("");
+            `;
+            }).join("");
         }
 
         if (data.tickets_served_today !== undefined) {
@@ -324,10 +329,32 @@ async function loadAllServices() {
     }
 }
 
+async function loadAllWindows() {
+    try {
+        const res = await fetch(`${CONFIG.API_URL}/operator/windows`, {
+            headers: { "session-id": sessionId }
+        });
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || "Ошибка загрузки рабочих мест");
+        }
+
+        allWindows = await res.json();
+        return allWindows;
+    } catch (e) {
+        console.error("Ошибка загрузки рабочих мест:", e);
+        alert(e.message || "Ошибка загрузки рабочих мест");
+        return [];
+    }
+}
+
 /* =========================
    Показ панели перенаправления
 ========================= */
-function showRedirect() {
+function showRedirect() { return showRedirectToService(); }
+
+function showRedirectToService() {
 
     if (!currentTicketId) {
         alert("Нет текущего клиента");
@@ -379,16 +406,137 @@ async function confirmRedirect() {
     if (result.detail) {
         alert(result.detail);
     } else {
-        alert("Билет перенаправлен");
+        alert(result.warning || result.message || "Билет перенаправлен");
         document.getElementById("current").textContent = "Рабочее место свободно";
+        document.getElementById("current-service").textContent = "";
         currentTicketId = null;
         document.getElementById("redirect-panel").style.display = "none";
         loadQueue();
+        loadCurrentTicket();
     }
 }
 
 function cancelRedirect() {
     document.getElementById("redirect-panel").style.display = "none";
+}
+
+function cancelRedirectToWindow() {
+    document.getElementById("redirect-to-window-panel").style.display = "none";
+}
+
+function compactText(value, maxLength = 62) {
+    const text = String(value || "").trim();
+    return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+}
+
+function formatRedirectWindowOption(windowItem) {
+    const operatorName = windowItem.operator_name || "оператор не назначен";
+    const windowName = windowItem.name || `Окно ${windowItem.id}`;
+    const serviceNames = Array.isArray(windowItem.service_names) ? windowItem.service_names : [];
+
+    let serviceText = "услуги не назначены";
+    if (serviceNames.length === 1) {
+        serviceText = serviceNames[0];
+    } else if (serviceNames.length > 1) {
+        serviceText = `${serviceNames[0]} +${serviceNames.length - 1}`;
+    }
+
+    const fullServiceText = serviceNames.length ? serviceNames.join(", ") : serviceText;
+
+    return {
+        shortText: `${operatorName} | ${windowName} | ${compactText(serviceText)}`,
+        fullText: `${operatorName} | ${windowName} | ${fullServiceText}`
+    };
+}
+
+async function showRedirectToWindow() {
+    if (!currentTicketId) {
+        alert("Нет текущего клиента");
+        return;
+    }
+
+    if (!allWindows.length) {
+        await loadAllWindows();
+    }
+
+    const select = document.getElementById("redirect-window");
+    select.innerHTML = "";
+
+    let firstOnlineWindowId = null;
+
+    allWindows.forEach(windowItem => {
+        const option = document.createElement("option");
+        option.value = windowItem.id;
+
+        const isOnline = windowItem.status === "online";
+        const formatted = formatRedirectWindowOption(windowItem);
+
+        option.textContent = formatted.shortText;
+        option.title = formatted.fullText;
+
+        if (!isOnline) {
+            option.disabled = true;
+            option.classList.add("window-option-disabled");
+        } else if (firstOnlineWindowId === null) {
+            firstOnlineWindowId = String(windowItem.id);
+        }
+
+        select.appendChild(option);
+    });
+
+    if (firstOnlineWindowId !== null) {
+        select.value = firstOnlineWindowId;
+    }
+
+    document.getElementById("redirect-panel").style.display = "none";
+    document.getElementById("redirect-to-window-panel").style.display = "block";
+}
+
+async function confirmRedirectToWindow() {
+    const windowId = document.getElementById("redirect-window").value;
+
+    if (!windowId) {
+        alert("Выберите рабочее место");
+        return;
+    }
+
+    if (!confirm("Вы уверены, что хотите перенаправить клиента на выбранное рабочее место?")) {
+        return;
+    }
+
+    try {
+        const res = await fetch(`${CONFIG.API_URL}/tickets/redirect-to-window`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "session-id": sessionId
+            },
+            body: JSON.stringify({
+                ticket_id: currentTicketId,
+                window_id: Number(windowId)
+            })
+        });
+
+        const result = await res.json().catch(() => ({}));
+
+        if (!res.ok || result.detail) {
+            alert(result.detail || result.message || "Ошибка перенаправления");
+            return;
+        }
+
+        alert(result.warning || result.message || "Билет перенаправлен");
+        currentTicketId = null;
+        currentNumber = null;
+        currentServiceName = null;
+        document.getElementById("current").textContent = "Рабочее место свободно";
+        document.getElementById("current-service").textContent = "";
+        document.getElementById("redirect-to-window-panel").style.display = "none";
+        await loadQueue();
+        await loadCurrentTicket();
+    } catch (e) {
+        console.error("Ошибка перенаправления на рабочее место:", e);
+        alert("Ошибка соединения с сервером");
+    }
 }
 
 async function changeWindowStatus(newStatus) {

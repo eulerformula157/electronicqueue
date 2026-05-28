@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Body, Header, Depends, status, Query
 from pydantic import BaseModel
-from sqlalchemy import Column, Integer, String, ForeignKey, TIMESTAMP, text, func, and_
+from sqlalchemy import Column, Integer, String, ForeignKey, TIMESTAMP, text, func, and_, literal
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy import create_engine
@@ -263,6 +263,7 @@ class Ticket(Base):
     service_id = Column(Integer, ForeignKey("services.id"))
     status = Column(String, default="waiting")
     window_id = Column(Integer, nullable=True)
+    target_window_id = Column(Integer, ForeignKey("windows.id"), nullable=True)
     created_at = Column(TIMESTAMP, server_default=text("CURRENT_TIMESTAMP"))
     called_at = Column(TIMESTAMP, nullable=True)
     finished_at = Column(TIMESTAMP, nullable=True)
@@ -355,6 +356,10 @@ class WindowService(Base):
 class RedirectRequest(BaseModel):
     ticket_id: int
     new_service_id: int
+
+class RedirectToWindowRequest(BaseModel):
+    ticket_id: int
+    window_id: int
 
 class WindowServiceCreate(BaseModel):
     window_id: int
@@ -530,7 +535,8 @@ async def reassign_waiting_tickets_from_window(db: Session, window_id: int):
 
     tickets = db.query(Ticket).filter(
         Ticket.status == "waiting",
-        Ticket.window_id == window_id
+        Ticket.window_id == window_id,
+        Ticket.target_window_id.is_(None)
     ).all()
 
     for ticket in tickets:
@@ -552,7 +558,8 @@ async def assign_unassigned_waiting_tickets(db: Session):
 
     tickets = db.query(Ticket).filter(
         Ticket.status == "waiting",
-        Ticket.window_id.is_(None)
+        Ticket.window_id.is_(None),
+        Ticket.target_window_id.is_(None)
     ).order_by(Ticket.created_at.asc()).all()
 
     for ticket in tickets:
@@ -762,7 +769,10 @@ async def cleanup_sessions():
                                     active_ticket.status = "waiting"
                                     active_ticket.window_id = None
 
-                                    if settings.get("queue_mode") == "dynamic_operator_distribution":
+                                    if (
+                                        settings.get("queue_mode") == "dynamic_operator_distribution"
+                                        and active_ticket.target_window_id is None
+                                    ):
                                         assign_ticket_to_least_loaded_window(db, active_ticket)
 
                                     need_board_update = True
@@ -1216,7 +1226,6 @@ async def call_next_ticket(operator: Operator = Depends(verify_session)):
         if not operator.window_id:
             return {"detail": "Оператору не назначено окно"}
 
-        # Проверяем, не обслуживается ли уже клиент
         current = db.query(Ticket).filter(
             Ticket.window_id == operator.window_id,
             Ticket.status == "called"
@@ -1225,58 +1234,66 @@ async def call_next_ticket(operator: Operator = Depends(verify_session)):
         if current:
             return {"detail": f"Сначала завершите клиента: {current.number}"}
 
-        # Ищем подходящий билет с учетом приоритета окна
-        # Сортируем: сначала по приоритету (asc - высокий приоритет вперед), 
-        # затем по времени создания (asc - старые билеты вперед)
         settings = get_system_settings_dict(db)
 
-        if settings.get("queue_mode") == "dynamic_operator_distribution":
-            ticket = (
-                db.query(Ticket)
-                .filter(
-                    Ticket.status == "waiting",
-                    Ticket.window_id == operator.window_id
-                )
-                .order_by(Ticket.created_at.asc())
-                .first()
+        # Сначала всегда вызываем билеты, явно перенаправленные на это окно.
+        ticket = (
+            db.query(Ticket)
+            .filter(
+                Ticket.status == "waiting",
+                Ticket.target_window_id == operator.window_id
             )
-        else:
-            ticket = (
-                db.query(Ticket)
-                .join(WindowService, Ticket.service_id == WindowService.service_id)
-                .filter(
-                    WindowService.window_id == operator.window_id,
-                    Ticket.status == "waiting"
+            .order_by(Ticket.created_at.asc())
+            .first()
+        )
+
+        if not ticket:
+            if settings.get("queue_mode") == "dynamic_operator_distribution":
+                ticket = (
+                    db.query(Ticket)
+                    .filter(
+                        Ticket.status == "waiting",
+                        Ticket.window_id == operator.window_id,
+                        Ticket.target_window_id.is_(None)
+                    )
+                    .order_by(Ticket.created_at.asc())
+                    .first()
                 )
-                .order_by(
-                    WindowService.priority.asc(),
-                    Ticket.created_at.asc()
+            else:
+                ticket = (
+                    db.query(Ticket)
+                    .join(WindowService, Ticket.service_id == WindowService.service_id)
+                    .filter(
+                        WindowService.window_id == operator.window_id,
+                        Ticket.status == "waiting",
+                        Ticket.target_window_id.is_(None)
+                    )
+                    .order_by(
+                        WindowService.priority.asc(),
+                        Ticket.created_at.asc()
+                    )
+                    .first()
                 )
-                .first()
-            )
 
         if not ticket:
             return {"detail": "Нет ожидающих билетов"}
 
         ticket.status = "called"
         ticket.window_id = operator.window_id
-        ticket.called_at = datetime.now() #text("CURRENT_TIMESTAMP")
+        ticket.target_window_id = None
+        ticket.called_at = datetime.now()
 
         db.commit()
         db.refresh(ticket)
 
         window = db.query(Window).filter(Window.id == ticket.window_id).first()
 
-        await manager.broadcast({
-            "type": "queue_updated"
-        })
-
+        await manager.broadcast({"type": "queue_updated"})
         await broadcast_board()
 
         if window:
             await broadcast_ticket_called(ticket, window)
-        
-        # ДОБАВЬТЕ ЭТО: возвращаем объект с именем услуги
+
         return {
             "id": ticket.id,
             "number": ticket.number,
@@ -1296,7 +1313,7 @@ async def call_specific_ticket(data: CallSpecificRequest, operator: Operator = D
         # Проверяем, не обслуживается ли уже клиент
         current = db.query(Ticket).filter(
             Ticket.window_id == operator.window_id,
-            Ticket.status == "waiting"
+            Ticket.status == "called"
         ).first()
 
         if current:
@@ -1311,19 +1328,25 @@ async def call_specific_ticket(data: CallSpecificRequest, operator: Operator = D
         if not ticket:
             return {"detail": "Билет с таким номером не найден или недоступен для вызова"}
 
-        # Проверяем, может ли это окно обслуживать данную услугу
-        window_service = db.query(WindowService).filter(
-            WindowService.window_id == operator.window_id,
-            WindowService.service_id == ticket.service_id
-        ).first()
+        # Если билет был перенаправлен на конкретное окно, вызвать его может только это окно.
+        if ticket.target_window_id is not None and ticket.target_window_id != operator.window_id:
+            return {"detail": "Этот талон перенаправлен на другое рабочее место"}
 
-        if not window_service:
-            return {"detail": "Ваше окно не обслуживает услугу этого талона"}
+        # Обычные билеты по-прежнему можно вызвать только на окне, которое обслуживает их услугу.
+        if ticket.target_window_id is None:
+            window_service = db.query(WindowService).filter(
+                WindowService.window_id == operator.window_id,
+                WindowService.service_id == ticket.service_id
+            ).first()
+
+            if not window_service:
+                return {"detail": "Ваше окно не обслуживает услугу этого талона"}
 
         # Обновляем статус билета и привязываем к текущему окну
         ticket.status = "called"
         ticket.window_id = operator.window_id
-        ticket.called_at = text("CURRENT_TIMESTAMP")
+        ticket.target_window_id = None
+        ticket.called_at = datetime.now()
 
         db.commit()
         db.refresh(ticket)
@@ -1394,36 +1417,53 @@ def get_my_queue(
         if not operator.window_id:
             return []
 
+        # 1) Перенаправленные именно на это окно билеты всегда сверху.
+        redirected_query = (
+            db.query(
+                Ticket.id,
+                Ticket.number,
+                Ticket.service_id,
+                Ticket.created_at,
+                Ticket.target_window_id,
+                Service.name.label("service_name"),
+                literal(0).label("priority")
+            )
+            .join(Service, Service.id == Ticket.service_id)
+            .filter(
+                Ticket.status == "waiting",
+                Ticket.target_window_id == operator.window_id
+            )
+            .order_by(Ticket.created_at.asc())
+        )
 
+        # 2) Обычные билеты ниже — по текущему режиму очереди.
         if settings.get("queue_mode") == "dynamic_operator_distribution":
-            tickets = (
+            ordinary_query = (
                 db.query(
                     Ticket.id,
                     Ticket.number,
                     Ticket.service_id,
                     Ticket.created_at,
-                    Service.name.label("service_name")
+                    Ticket.target_window_id,
+                    Service.name.label("service_name"),
+                    literal(None).label("priority")
                 )
                 .join(Service, Service.id == Ticket.service_id)
                 .filter(
                     Ticket.window_id == operator.window_id,
-                    Ticket.status == "waiting"
+                    Ticket.status == "waiting",
+                    Ticket.target_window_id.is_(None)
                 )
                 .order_by(Ticket.created_at.asc())
-                .offset(skip)
-                .limit(limit)
-                .all()
             )
         else:
-
-
-        # Соединяем билеты с настройками приоритетов конкретного окна
-            tickets = (
+            ordinary_query = (
                 db.query(
                     Ticket.id,
                     Ticket.number,
                     Ticket.service_id,
                     Ticket.created_at,
+                    Ticket.target_window_id,
                     Service.name.label("service_name"),
                     WindowService.priority.label("priority")
                 )
@@ -1431,18 +1471,17 @@ def get_my_queue(
                 .join(Service, Service.id == Ticket.service_id)
                 .filter(
                     WindowService.window_id == operator.window_id,
-                    Ticket.status == "waiting"
+                    Ticket.status == "waiting",
+                    Ticket.target_window_id.is_(None)
                 )
                 .order_by(
-                    WindowService.priority.asc(), # Самые важные услуги сверху
-                    Ticket.created_at.asc()        # Внутри приоритета — по времени записи
+                    WindowService.priority.asc(),
+                    Ticket.created_at.asc()
                 )
-                .offset(skip)
-                .limit(limit)
-                .all()
             )
 
-        # Считаем обслуженные за сегодня
+        tickets = (redirected_query.all() + ordinary_query.all())[skip:skip + limit]
+
         today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         tickets_served_today = db.query(Ticket).filter(
             Ticket.window_id == operator.window_id,
@@ -1458,13 +1497,96 @@ def get_my_queue(
                 "service_id": t.service_id,
                 "service_name": t.service_name or "Неизвестно",
                 "created_at": t.created_at.strftime("%H:%M") if t.created_at else "—",
-                "priority": getattr(t, "priority", None)
+                "priority": getattr(t, "priority", None),
+                "target_window_id": t.target_window_id,
+                "is_redirected_to_window": t.target_window_id == operator.window_id
             })
 
         return {
             "tickets": result,
             "tickets_served_today": tickets_served_today
         }
+    finally:
+        db.close()
+
+@app.get("/operator/windows", tags=["Operators"])
+def get_operator_windows(operator: Operator = Depends(verify_session)):
+    db = SessionLocal()
+    try:
+        windows = db.query(Window).order_by(Window.id.asc()).all()
+        result = []
+
+        for w in windows:
+            assigned_operator = (
+                db.query(Operator)
+                .filter(Operator.window_id == w.id)
+                .first()
+            )
+
+            services = (
+                db.query(Service)
+                .join(WindowService, WindowService.service_id == Service.id)
+                .filter(WindowService.window_id == w.id)
+                .order_by(WindowService.priority.asc(), Service.name.asc())
+                .all()
+            )
+
+            result.append({
+                "id": w.id,
+                "name": w.name,
+                "status": w.status,
+                "operator_id": assigned_operator.id if assigned_operator else None,
+                "operator_name": assigned_operator.name if assigned_operator else None,
+                "operator_login": assigned_operator.login if assigned_operator else None,
+                "services": [
+                    {"id": service.id, "name": service.name, "status": service.status}
+                    for service in services
+                ],
+                "service_names": [service.name for service in services]
+            })
+
+        return result
+    finally:
+        db.close()
+
+@app.post("/tickets/redirect-to-window", tags=["Tickets"])
+async def redirect_ticket_to_window(data: RedirectToWindowRequest, operator: Operator = Depends(verify_session)):
+    db = SessionLocal()
+    try:
+        if not operator.window_id:
+            raise HTTPException(status_code=400, detail="Оператору не назначено окно")
+
+        ticket = db.query(Ticket).filter(
+            Ticket.id == data.ticket_id,
+            Ticket.status == "called"
+        ).first()
+        if not ticket:
+            raise HTTPException(status_code=404, detail="Вызванный билет не найден")
+
+        if ticket.window_id != operator.window_id:
+            raise HTTPException(status_code=403, detail="Этот билет не является текущим билетом вашего окна")
+
+        target_window = db.query(Window).filter(Window.id == data.window_id).first()
+        if not target_window:
+            raise HTTPException(status_code=404, detail="Рабочее место для перенаправления не найдено")
+
+        ticket.status = "waiting"
+        ticket.window_id = None
+        ticket.target_window_id = target_window.id
+        ticket.created_at = datetime.now()
+        ticket.called_at = None
+
+        db.commit()
+        db.refresh(ticket)
+
+        await manager.broadcast({"type": "queue_updated"})
+        await broadcast_board()
+
+        message = f"Билет перенаправлен на рабочее место: {target_window.name}"
+        response = {"message": message, "ticket": ticket}
+        if target_window.status != "online":
+            response["warning"] = f"Рабочее место {target_window.name} сейчас не online"
+        return response
     finally:
         db.close()
 
@@ -1503,7 +1625,9 @@ async def redirect_ticket(data: RedirectRequest, operator: Operator = Depends(ve
         ticket.service_id = service.id
         ticket.status = "waiting"
         ticket.window_id = None
+        ticket.target_window_id = None
         ticket.created_at = datetime.now() #text("CURRENT_TIMESTAMP")
+        ticket.called_at = None
 
         if settings.get("queue_mode") == "dynamic_operator_distribution":
             assign_ticket_to_least_loaded_window(db, ticket)
@@ -1955,7 +2079,10 @@ async def logout(session_id: str = Header(...)):
                         active_ticket.status = "waiting"
                         active_ticket.window_id = None
 
-                        if settings.get("queue_mode") == "dynamic_operator_distribution":
+                        if (
+                            settings.get("queue_mode") == "dynamic_operator_distribution"
+                            and active_ticket.target_window_id is None
+                        ):
                             assign_ticket_to_least_loaded_window(db, active_ticket)
 
                 db.query(UserSession).filter(UserSession.operator_id == operator_id).delete()
