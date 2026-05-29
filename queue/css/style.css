@@ -1558,7 +1558,7 @@ body.board-page .board-wrapper-with-waiting{
     padding: 18px 20px 24px 20px;
     box-sizing: border-box;
     display: grid;
-    grid-template-columns: 2fr 1fr; /* 2/3 под вызванные, 1/3 под ожидание */
+    grid-template-columns: 1fr 2fr; /* 2/3 под вызванные, 1/3 под ожидание */
     gap: 20px;
 }
 
