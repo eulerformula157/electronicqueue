@@ -595,13 +595,46 @@ def get_called_tickets():
         return result
     finally:
         db.close()
+
+def get_waiting_tickets_for_board():
+    db = SessionLocal()
+    try:
+        tickets = (
+            db.query(Ticket, Service)
+            .join(Service, Ticket.service_id == Service.id)
+            .filter(Ticket.status == "waiting")
+            .order_by(Ticket.created_at.asc())
+            .all()
+        )
+
+        result = []
+        for ticket, service in tickets:
+            result.append({
+                "id": ticket.id,
+                "number": ticket.number,
+                "service_id": ticket.service_id,
+                "service_name": service.name,
+                "window_id": ticket.window_id,
+                "target_window_id": ticket.target_window_id,
+                "created_at": ticket.created_at.isoformat() if ticket.created_at else None
+            })
+
+        return result
+    finally:
+        db.close()
+
+def get_board_state():
+    return {
+        "type": "board_state",
+        "called": get_called_tickets(),
+        "waiting": get_waiting_tickets_for_board()
+    }
         
 async def broadcast_board():
-    tickets_data = get_called_tickets()
-    # Для доски шлем массив напрямую
+    board_state = get_board_state()
     for conn in manager.active_connections:
         try:
-            await conn.send_json(tickets_data)
+            await conn.send_json(board_state)
         except:
             pass
 
@@ -953,9 +986,8 @@ async def websocket_endpoint(websocket: WebSocket):
 async def websocket_board(websocket: WebSocket):
     await manager.connect(websocket)
     try:
-        # при подключении сразу отправляем текущее состояние
-        tickets_data = get_called_tickets()  # массив с window_name и number
-        await websocket.send_json(tickets_data)
+        # при подключении сразу отправляем текущее состояние табло
+        await websocket.send_json(get_board_state())
 
         while True:
             await websocket.receive_text()  # держим соединение живым

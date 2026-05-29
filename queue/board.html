@@ -11,8 +11,24 @@
 <h1 id="title">Табло очереди Приемной комиссии</h1>
 <div id="clock-container" class="clock-container"></div>
 
-<div class="board-wrapper">
-    <div class="board" id="board"></div>
+<div class="board-wrapper board-wrapper-with-waiting">
+    <section class="board-section board-section-called">
+        <div class="board-section-header">
+            <span>Вызванные</span>
+            <span id="called-page-indicator" class="board-page-indicator"></span>
+        </div>
+        <div class="board" id="board"></div>
+        <div id="called-page-dots" class="board-page-dots"></div>
+    </section>
+
+    <section class="board-section board-section-waiting">
+        <div class="board-section-header">
+            <span>Ожидают</span>
+            <span id="waiting-page-indicator" class="board-page-indicator"></span>
+        </div>
+        <div class="waiting-board" id="waiting-board"></div>
+        <div id="waiting-page-dots" class="board-page-dots"></div>
+    </section>
 </div>
 
 <div class="status-indicator" id="ws-status">WS: connecting...</div>
