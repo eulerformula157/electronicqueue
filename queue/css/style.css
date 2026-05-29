@@ -216,6 +216,7 @@ body.operator-page h3{
     letter-spacing: 0.5px;
     padding-bottom: 8px;
 }
+
 body.operator-page{
     margin: 0;
     font-family: 'Inter', -apple-system, sans-serif;
@@ -223,7 +224,10 @@ body.operator-page{
     color: var(--text-main);
     display: flex;
     flex-direction: column;
-    min-height: 100vh;   
+
+    height: 100vh;        /* вместо min-height */
+    overflow: hidden;     /* чтобы скролл был внутри очереди */
+
     box-sizing: border-box;
 }
 
@@ -818,6 +822,21 @@ body.admin-page{
     font-family: 'Inter', -apple-system, sans-serif;
     background-color: var(--bg);
     color: var(--text-main);
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+body.admin-page .content{
+    margin: 30px auto;
+    padding: 0 20px 70px 20px;
+}
+
+html {
+    overflow-y: auto;
+}
+
+body.admin-page {
+    overflow-y: visible;
 }
 
 
@@ -876,26 +895,77 @@ body.admin-page #tab-exit:hover{
 }
 
 
-/* --- Контентная область --- */
-body.admin-page .content{
-    margin: 30px auto;
-    padding: 0 20px;
-}
 
 
 /* Стилизация форм и таблиц под glass-card */
 body.admin-page #form,
-body.admin-page table{
+body.admin-page .table-scroll{
     background: var(--card-bg);
     border-radius: 16px;
     box-shadow: var(--shadow);
     margin-bottom: 30px;
-    overflow: hidden; /* Чтобы скругления работали */
-}
-body.admin-page #form{
-    padding: 25px;
 }
 
+body.admin-page .table-scroll{
+    max-height: calc(100vh - 240px);
+    overflow-y: auto;
+    overflow-x: auto;
+}
+
+body.admin-page table{
+    width: 100%;
+    border-collapse: collapse;
+    border: none;
+    margin: 0;
+    box-shadow: none;
+    background: transparent;
+}
+
+body.admin-page #form .form{
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+body.admin-page #form input{
+    width: 260px;
+    box-sizing: border-box;
+    margin: 0;
+}
+
+body.admin-page #form button{
+    height: 42px;
+}
+
+body.admin-page .content{
+    max-width: 1720px;
+    margin: 30px 90px 0 80px; /* левее */
+    padding: 0 20px 70px 20px;
+}
+
+body.admin-page #form{
+    padding: 28px 26px;     /* подложка чуть выше/шире */
+}
+
+body.admin-page #form .form{
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: nowrap;
+}
+
+body.admin-page #form input{
+    width: 250px;           /* поля чуть уже */
+    box-sizing: border-box;
+    margin: 0;
+}
+
+body.admin-page #form button{
+    height: 42px;
+    padding: 0 22px;
+    margin: 0;
+}
 
 /* --- Таблицы --- */
 body.admin-page table{
