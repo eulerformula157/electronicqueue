@@ -1,20 +1,25 @@
 /* board-lite.js — ультра-легковесное табло для старых ТВ (Chromium 79 / WebOS).
-   Только вывод билетов на экран. Без аудио, без анимаций.
+   Видео выводит media.js. Здесь только табло: ожидающие + вызванные.
    Без async/await, стрелок-функций, optional chaining, replaceAll, Set/Map. */
 
 (function () {
-    var PAGE_SIZE = (window.BOARD_CONFIG && window.BOARD_CONFIG.pageSize) || 9;
+    var CALLED_PAGE_SIZE = (window.BOARD_CONFIG && window.BOARD_CONFIG.calledPageSize) || 3;
+    var WAITING_PAGE_SIZE = (window.BOARD_CONFIG && window.BOARD_CONFIG.waitingPageSize) || 4;
     var PAGE_INTERVAL_MS = (window.BOARD_CONFIG && window.BOARD_CONFIG.pageIntervalMs) || 5000;
     var RECONNECT_MS = 3000;
     var CLEAN_PROCESSED_MS = 5 * 60 * 1000;
 
     var ws = null;
-    var previousTickets = [];
+    var previousCalledTickets = [];
+    var latestWaitingTickets = [];
     var initialized = false;
     var processedIds = {};
+    var highlightedIds = {};
 
-    var currentPage = 0;
-    var pages = [];
+    var calledCurrentPage = 0;
+    var waitingCurrentPage = 0;
+    var calledPages = [];
+    var waitingPages = [];
     var pageTimer = null;
 
     function byId(id) {
@@ -36,7 +41,7 @@
             .replace(/&/g, "&amp;")
             .replace(/</g, "&lt;")
             .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
+            .replace(/\"/g, "&quot;")
             .replace(/'/g, "&#039;");
     }
 
@@ -70,6 +75,7 @@
             number: number,
             ticket_number: ticket.ticket_number || number,
             window_name: windowName,
+            display_text: ticket.display_text || "",
             tts_text: ticket.tts_text || ""
         };
     }
@@ -78,12 +84,12 @@
         var i;
         var n = toStr(number);
 
-        for (i = 0; i < previousTickets.length; i++) {
+        for (i = 0; i < previousCalledTickets.length; i++) {
             if (
-                getTicketNumber(previousTickets[i]) === n ||
-                toStr(previousTickets[i].ticket_number) === n
+                getTicketNumber(previousCalledTickets[i]) === n ||
+                toStr(previousCalledTickets[i].ticket_number) === n
             ) {
-                return previousTickets[i];
+                return previousCalledTickets[i];
             }
         }
 
@@ -123,37 +129,46 @@
 
     function updateTitle() {
         var title = byId("title");
-
         if (!title) return;
-
-        if (pages.length > 1) {
-            title.innerHTML =
-                "Табло очереди Приемной комиссии (" +
-                (currentPage + 1) +
-                "/" +
-                pages.length +
-                ")";
-        } else {
-            title.innerHTML = "Табло очереди Приемной комиссии";
-        }
+        title.innerHTML = "Табло очереди Приемной комиссии";
     }
 
-    function buildPages(tickets) {
+    function buildPages(tickets, pageSize) {
         var result = [];
         var i;
 
-        if (!tickets || !tickets.length) {
-            return result;
-        }
+        if (!tickets || !tickets.length) return result;
 
-        for (i = 0; i < tickets.length; i += PAGE_SIZE) {
-            result.push(tickets.slice(i, i + PAGE_SIZE));
+        for (i = 0; i < tickets.length; i += pageSize) {
+            result.push(tickets.slice(i, i + pageSize));
         }
 
         return result;
     }
 
-    function renderPage() {
+    function renderPageDots(containerId, totalPages, activePage) {
+        return;
+    }
+
+    function updatePageIndicators() {
+        var calledIndicator = byId("called-page-indicator");
+        var waitingIndicator = byId("waiting-page-indicator");
+
+        if (calledIndicator) {
+            calledIndicator.innerHTML = calledPages.length > 1
+                ? (calledCurrentPage + 1) + "/" + calledPages.length
+                : "";
+        }
+
+        if (waitingIndicator) {
+            waitingIndicator.innerHTML = waitingPages.length > 1
+                ? (waitingCurrentPage + 1) + "/" + waitingPages.length
+                : "";
+        }
+
+    }
+
+    function renderCalledPage() {
         var board = byId("board");
         var html = "";
         var currentTickets;
@@ -165,11 +180,10 @@
 
         if (!board) return;
 
-        currentTickets = pages[currentPage] || [];
+        currentTickets = calledPages[calledCurrentPage] || [];
 
         if (!currentTickets.length) {
-            board.innerHTML = "";
-            updateTitle();
+            board.innerHTML = '<div class="board-empty">Нет вызванных билетов</div>';
             return;
         }
 
@@ -180,17 +194,67 @@
             windowName = getWindowName(t);
 
             html += ""
-                + '<div class="card" data-ticket-id="' + escapeHtml(id) + '">'
+                + '<div class="card' + (highlightedIds[id] ? ' calling' : '') + '" data-ticket-id="' + escapeHtml(id) + '">'
                 + '  <div class="line">'
-                + '    <div class="ticket"><span></span><span>' + escapeHtml(number) + '</span></div>'
+                + '    <div class="ticket"><span>БИЛЕТ</span><span>' + escapeHtml(number) + '</span></div>'
                 + '    <div class="arrow">→</div>'
-                + '    <div class="window"><span></span><span>' + escapeHtml(windowName) + '</span></div>'
+                + '    <div class="window"><span>ОПЕРАТОР</span><span>' + escapeHtml(windowName) + '</span></div>'
                 + '  </div>'
                 + '</div>';
         }
 
         board.innerHTML = html;
+    }
+
+    function renderWaitingPage() {
+        var waitingBoard = byId("waiting-board");
+        var html = "";
+        var currentTickets;
+        var i;
+        var t;
+        var number;
+
+        if (!waitingBoard) return;
+
+        currentTickets = waitingPages[waitingCurrentPage] || [];
+
+        if (!currentTickets.length) {
+            waitingBoard.innerHTML = '<div class="waiting-empty">Очередь ожидания пуста</div>';
+            return;
+        }
+
+        for (i = 0; i < currentTickets.length; i++) {
+            t = normalizeTicket(currentTickets[i]);
+            number = getTicketNumber(t);
+
+            html += ""
+                + '<div class="waiting-card">'
+                + '  <div class="line waiting-line">'
+                + '    <span class="ticket">' + escapeHtml(number) + '</span>'
+                + '  </div>'
+                + '</div>';
+        }
+
+        waitingBoard.innerHTML = html;
+    }
+
+    function renderPage() {
         updateTitle();
+        renderCalledPage();
+        renderWaitingPage();
+        updatePageIndicators();
+    }
+
+    function advancePages() {
+        if (calledPages.length > 1) {
+            calledCurrentPage = calledCurrentPage + 1;
+            if (calledCurrentPage >= calledPages.length) calledCurrentPage = 0;
+        }
+
+        if (waitingPages.length > 1) {
+            waitingCurrentPage = waitingCurrentPage + 1;
+            if (waitingCurrentPage >= waitingPages.length) waitingCurrentPage = 0;
+        }
     }
 
     function startPageTimer() {
@@ -199,25 +263,20 @@
             pageTimer = null;
         }
 
-        if (pages.length > 1) {
+        if (calledPages.length > 1 || waitingPages.length > 1) {
             pageTimer = setInterval(function () {
-                currentPage = currentPage + 1;
-
-                if (currentPage >= pages.length) {
-                    currentPage = 0;
-                }
-
+                advancePages();
                 renderPage();
             }, PAGE_INTERVAL_MS);
         }
     }
 
-    function renderBoard(tickets) {
-        pages = buildPages(tickets);
+    function renderBoard(calledTickets, waitingTickets) {
+        calledPages = buildPages(calledTickets || [], CALLED_PAGE_SIZE);
+        waitingPages = buildPages(waitingTickets || [], WAITING_PAGE_SIZE);
 
-        if (currentPage >= pages.length) {
-            currentPage = 0;
-        }
+        if (calledCurrentPage >= calledPages.length) calledCurrentPage = 0;
+        if (waitingCurrentPage >= waitingPages.length) waitingCurrentPage = 0;
 
         renderPage();
         startPageTimer();
@@ -231,25 +290,24 @@
 
         if (!id) return;
 
-        /* Защита от дубликатов в рамках одной сессии */
-        if (processedIds[id]) {
-            return;
-        }
+        if (processedIds[id]) return;
 
         processedIds[id] = new Date().getTime();
+        highlightedIds[id] = new Date().getTime();
 
-        /* Добавляем талон в начало массива, если его там еще нет */
-        for (i = 0; i < previousTickets.length; i++) {
-            if (getTicketId(previousTickets[i]) === id) {
+        for (i = 0; i < previousCalledTickets.length; i++) {
+            if (getTicketId(previousCalledTickets[i]) === id) {
                 found = true;
                 break;
             }
         }
 
         if (!found) {
-            previousTickets.unshift(normalized);
-            currentPage = 0;
-            renderBoard(previousTickets);
+            previousCalledTickets.unshift(normalized);
+            calledCurrentPage = 0;
+            renderBoard(previousCalledTickets, latestWaitingTickets);
+        } else {
+            renderPage();
         }
     }
 
@@ -278,49 +336,76 @@
             id = getTicketId(tickets[i]);
             found = false;
 
-            for (j = 0; j < previousTickets.length; j++) {
-                if (getTicketId(previousTickets[j]) === id) {
+            for (j = 0; j < previousCalledTickets.length; j++) {
+                if (getTicketId(previousCalledTickets[j]) === id) {
                     found = true;
                     break;
                 }
             }
 
-            if (!found) {
-                announceTicket(tickets[i]);
-            }
+            if (!found) announceTicket(tickets[i]);
         }
     }
 
-    function handleTicketsList(tickets) {
-        var normalized = mergeIncomingTickets(tickets);
+    function normalizeBoardState(data) {
+        if (data && (data.type === "board_state" || Object.prototype.toString.call(data.called) === "[object Array]" || Object.prototype.toString.call(data.waiting) === "[object Array]")) {
+            return {
+                called: Object.prototype.toString.call(data.called) === "[object Array]" ? data.called : (Object.prototype.toString.call(data.tickets) === "[object Array]" ? data.tickets : []),
+                waiting: Object.prototype.toString.call(data.waiting) === "[object Array]" ? data.waiting : []
+            };
+        }
 
-        detectAndAnnounceNewTickets(normalized);
+        if (Object.prototype.toString.call(data) === "[object Array]") {
+            return { called: data, waiting: latestWaitingTickets };
+        }
 
-        previousTickets = normalized;
+        if (data && Object.prototype.toString.call(data.tickets) === "[object Array]") {
+            return { called: data.tickets, waiting: latestWaitingTickets };
+        }
+
+        return null;
+    }
+
+    function handleBoardState(boardState) {
+        var called = mergeIncomingTickets(boardState.called || []);
+        var waiting = mergeIncomingTickets(boardState.waiting || []);
+
+        detectAndAnnounceNewTickets(called);
+
+        previousCalledTickets = called;
+        latestWaitingTickets = waiting;
         initialized = true;
 
-        renderBoard(previousTickets);
+        renderBoard(previousCalledTickets, latestWaitingTickets);
     }
 
     function handleRecall(data) {
         var ticket;
         var existing;
         var realId;
+        var srcTicket;
 
-        realId = data.ticket_id || data.id || "";
+        if (data.type === "ticket_called" && data.ticket) {
+            srcTicket = data.ticket;
+        } else {
+            srcTicket = data;
+        }
+
+        realId = srcTicket.ticket_id || srcTicket.id || data.ticket_id || data.id || data.call_id || "";
 
         if (!realId) {
-            existing = findTicketByNumber(data.ticket_number || data.number);
+            existing = findTicketByNumber(srcTicket.ticket_number || srcTicket.number || data.ticket_number || data.number);
             if (existing) realId = getTicketId(existing);
         }
 
         ticket = normalizeTicket({
-            id: realId || data.ticket_number || data.number,
-            ticket_id: data.ticket_id || realId,
-            number: data.ticket_number || data.number,
-            ticket_number: data.ticket_number || data.number,
-            window_name: data.window_name || data.window || data.window_number,
-            tts_text: data.tts_text || ""
+            id: realId || srcTicket.ticket_number || srcTicket.number || data.ticket_number || data.number,
+            ticket_id: srcTicket.ticket_id || data.ticket_id || realId,
+            number: srcTicket.ticket_number || srcTicket.number || data.ticket_number || data.number,
+            ticket_number: srcTicket.ticket_number || srcTicket.number || data.ticket_number || data.number,
+            window_name: srcTicket.window_name || data.window_name || srcTicket.window || data.window || data.window_number,
+            display_text: srcTicket.display_text || data.display_text || "",
+            tts_text: data.tts_text || srcTicket.tts_text || ""
         });
 
         announceTicket(ticket);
@@ -328,6 +413,7 @@
 
     function handleMessage(event) {
         var data;
+        var boardState;
 
         try {
             data = JSON.parse(event.data);
@@ -339,20 +425,12 @@
             try {
                 if (window.initPlaylist) window.initPlaylist(true);
             } catch (e2) {}
-
             return;
         }
 
-        if (
-            data.tickets &&
-            Object.prototype.toString.call(data.tickets) === "[object Array]"
-        ) {
-            handleTicketsList(data.tickets);
-            return;
-        }
-
-        if (Object.prototype.toString.call(data) === "[object Array]") {
-            handleTicketsList(data);
+        boardState = normalizeBoardState(data);
+        if (boardState) {
+            handleBoardState(boardState);
             return;
         }
 
@@ -397,13 +475,13 @@
         updateClock();
         setInterval(updateClock, 1000);
 
-        renderBoard([]);
+        renderBoard([], []);
         connectWS();
 
-        /* Чистка истории раз в минуту */
         setInterval(function () {
             var now = new Date().getTime();
             var key;
+            var changed = false;
 
             for (key in processedIds) {
                 if (processedIds.hasOwnProperty(key)) {
@@ -412,7 +490,18 @@
                     }
                 }
             }
-        }, 60000);
+
+            for (key in highlightedIds) {
+                if (highlightedIds.hasOwnProperty(key)) {
+                    if (now - highlightedIds[key] > 8000) {
+                        delete highlightedIds[key];
+                        changed = true;
+                    }
+                }
+            }
+
+            if (changed) renderPage();
+        }, 1000);
     }
 
     if (document.readyState === "loading") {

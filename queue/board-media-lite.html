@@ -4,7 +4,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%2328a745'/%3E%3Ccircle cx='5' cy='8' r='2' fill='white'/%3E%3Cpath d='M10,4 C12,6 12,10 10,12' stroke='white' stroke-width='2' fill='none'/%3E%3C/svg%3E">
     <meta charset="UTF-8">
     <title>Табло очереди Приемной комиссии (LG Lite)</title>
-    <link rel="stylesheet" href="/queue/css/style.css?v=lg-lite-1">
+    <link rel="stylesheet" href="/queue/css/style.css?v=lg-lite-3">
 </head>
 <body class="board-media-page lite-version">
 
@@ -15,13 +15,24 @@
   <div class="media-panel">
     <video id="media-video" autoplay playsinline></video>
   </div>
-<div class="board-column">
-  <div class="board-header">
-    <span>Билет</span>
-    <span>Оператор</span>
+
+  <div class="board-column board-column-split">
+    <section class="lite-board-section lite-board-section-waiting">
+      <div class="lite-board-section-header">
+        <span>Ожидающие</span>
+        <span id="waiting-page-indicator" class="board-page-indicator"></span>
+      </div>
+      <div class="waiting-board" id="waiting-board"></div>
+    </section>
+
+    <section class="lite-board-section lite-board-section-called">
+      <div class="lite-board-section-header">
+        <span>Вызванные</span>
+        <span id="called-page-indicator" class="board-page-indicator"></span>
+      </div>
+      <div class="board" id="board"></div>
+    </section>
   </div>
-  <div class="board" id="board"></div>
-</div>
 </div>
 
 <div class="status-indicator" id="ws-status">WS: connecting...</div>
